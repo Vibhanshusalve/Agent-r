@@ -1,0 +1,13 @@
+# Exclude Stolen Data
+loot/
+*.db
+key_*.txt
+
+# Exclude Cache
+__pycache__/
+*.pyc
+
+# Exclude Virtual Env
+venv/
+env/
+.env
