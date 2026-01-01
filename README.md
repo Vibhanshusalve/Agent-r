@@ -1,16 +1,16 @@
-# 🎯 Agent-R: AI-Powered Pentesting Agent
+#  Agent-R: AI-Powered Pentesting Agent
 
 A hybrid pentesting agent with TLS-encrypted C2, AI-powered autonomous attack mode, and interactive AI assistant.
 
 ## Features
 
-- **🔒 TLS Encrypted C2** - All shell communications encrypted with SSL/TLS
-- **🤖 AI Autonomous Mode** - DeepSeek Coder 7B decides attack chain automatically
-- **💬 AI Assistant** - Tell the AI what you want in plain English
-- **🔐 Persistence** - Multiple methods (Startup, Registry, Secure folder)
-- **🔑 Credential Theft** - WiFi passwords, browser credentials, Windows Vault
-- **📺 Live Monitor** - Real-time screen capture stream
-- **🛡️ Evasion** - Variable obfuscation, LOLBin execution
+- ** TLS Encrypted C2** - All shell communications encrypted with SSL/TLS
+- ** AI Autonomous Mode** - DeepSeek Coder 7B decides attack chain automatically
+- ** AI Assistant** - Tell the AI what you want in plain English
+- ** Persistence** - Multiple methods (Startup, Registry, Secure folder)
+- ** Credential Theft** - WiFi passwords, browser credentials, Windows Vault
+- ** Live Monitor** - Real-time screen capture stream
+- ** Evasion** - Variable obfuscation, LOLBin execution
 
 ## Quick Start
 
@@ -36,13 +36,13 @@ python3 hybrid_agent.py
 
 ### Phase 2: Post-Exploitation
 ```
-[1] 🔐 Install Persistence
-[2] �� Steal Data  
-[3] ⬆️  Privilege Escalation
-[4] 💻 Raw Shell
-[5] 🔄 Wait for Reconnect
-[6] 🤖 AI Autonomous Mode    ← AI attacks automatically
-[7] 💬 AI Assistant          ← Tell AI what to do
+[1]  Install Persistence
+[2]  Steal Data  
+[3]   Privilege Escalation
+[4]  Raw Shell
+[5]  Wait for Reconnect
+[6]  AI Autonomous Mode    ← AI attacks automatically
+[7]  AI Assistant          ← Tell AI what to do
 ```
 
 ## AI Features
@@ -57,9 +57,9 @@ AI automatically performs:
 Type natural language commands:
 ```
 > find all wifi passwords
-🧠 AI generates: netsh wlan show profiles | ...
+ AI generates: netsh wlan show profiles | ...
 > check if I'm admin
-🧠 AI generates: whoami /priv
+ AI generates: whoami /priv
 ```
 
 ## Requirements
@@ -87,5 +87,5 @@ This tool is intended for:
 Unauthorized use is illegal. You are responsible for compliance with applicable laws.
 
 ## Credits
+Vibhanshu Salve
 
-Built with 🤖 AI assistance using DeepSeek Coder.
