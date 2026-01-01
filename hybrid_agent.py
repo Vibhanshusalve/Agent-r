@@ -275,15 +275,20 @@ POWERSHELL COMMAND:"""
             ai_response = ask_ai_streaming(prompt, max_tokens=300)
             print()
             
-            # Parse command
-            command = ai_response.strip().split("\n")[0]
+            # Parse command - strip markdown code blocks if present
+            lines = [l.strip() for l in ai_response.strip().split("\n") if l.strip()]
+            
+            # Filter out markdown formatting
+            lines = [l for l in lines if not l.startswith("```")]
+            
+            command = lines[0] if lines else ""
             
             if not command or command.startswith("[AI ERROR"):
-                console.print(f"[red]{ai_response}[/]")
+                console.print(f"[red]Could not parse command from AI response[/]")
                 continue
             
             # Show final command and ask for confirmation
-            console.print(f"[bold yellow]→ Extracted command:[/] {command}")
+            console.print(f"[bold yellow]→ Command:[/] {command}")
             confirm = input("Execute? [Y/n]: ").strip().lower()
             
             if confirm in ['', 'y', 'yes']:
