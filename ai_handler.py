@@ -16,7 +16,7 @@ MODEL_NAME = "deepseek-coder:6.7b"
 
 class AgentState:
     """Tracks what we know about the victim and our objectives."""
-    
+
     def __init__(self):
         self.hostname = None
         self.username = None
@@ -28,7 +28,7 @@ class AgentState:
         self.persistence_installed = False
         self.command_history = []
         self.iteration = 0
-        
+
     def to_dict(self):
         return {
             "hostname": self.hostname,
@@ -96,7 +96,7 @@ def ask_ai_streaming(prompt, max_tokens=500):
 
 def build_ai_prompt(state, last_output=""):
     """Build the prompt for the AI to decide next action."""
-    
+
     # Build EDR-aware guidance
     edr_guidance = ""
     if state.edr_processes:
@@ -115,7 +115,7 @@ NO EDR DETECTED - can use more aggressive techniques:
 - PowerShell scripts OK
 - Registry modifications OK
 """
-    
+
     return f"""You are an autonomous pentesting AI with shell access to a Windows victim.
 
 CURRENT STATE:
@@ -133,7 +133,7 @@ OBJECTIVES (complete in order):
 RULES:
 - Respond with ONLY ONE PowerShell command
 - No explanations, just the command
-- Use short, efficient commands  
+- Use short, efficient commands
 - If EDR detected, use stealthier techniques
 - If objective done, move to next
 
@@ -153,6 +153,7 @@ def detect_edr_from_output(result, state):
     if result:
         result_lower = result.lower()
         for edr in EDR_NAMES:
-            if edr in result_lower and edr not in [e.lower() for e in state.edr_processes]:
+            if edr in result_lower and edr not in [
+                    e.lower() for e in state.edr_processes]:
                 state.edr_processes.append(edr.capitalize())
                 console.print(f"[red]EDR Detected: {edr.capitalize()}[/]")

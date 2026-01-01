@@ -5,8 +5,7 @@ Tracks multiple connected agents, manages task queues
 
 import uuid
 import time
-from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from collections import deque
 
@@ -23,7 +22,7 @@ class Task:
     result_at: Optional[float] = None
 
 
-@dataclass 
+@dataclass
 class Agent:
     """Represents a connected agent."""
     agent_id: str
@@ -36,21 +35,31 @@ class Agent:
     last_seen: float = field(default_factory=time.time)
     task_queue: deque = field(default_factory=deque)
     completed_tasks: List[Task] = field(default_factory=list)
-    
+
     def is_alive(self, timeout: int = 60) -> bool:
         """Check if agent has checked in recently."""
         return (time.time() - self.last_seen) < timeout
-    
-    def update_beacon(self, hostname: str = None, username: str = None, 
-                      is_admin: bool = None, os_version: str = None, pid: int = None):
+
+    def update_beacon(
+            self,
+            hostname: str = None,
+            username: str = None,
+            is_admin: bool = None,
+            os_version: str = None,
+            pid: int = None):
         """Update agent info from beacon."""
         self.last_seen = time.time()
-        if hostname: self.hostname = hostname
-        if username: self.username = username
-        if is_admin is not None: self.is_admin = is_admin
-        if os_version: self.os_version = os_version
-        if pid: self.pid = pid
-    
+        if hostname:
+            self.hostname = hostname
+        if username:
+            self.username = username
+        if is_admin is not None:
+            self.is_admin = is_admin
+        if os_version:
+            self.os_version = os_version
+        if pid:
+            self.pid = pid
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for display."""
         return {
@@ -67,11 +76,11 @@ class Agent:
 
 class AgentManager:
     """Manages multiple connected agents."""
-    
+
     def __init__(self):
         self.agents: Dict[str, Agent] = {}
         self.current_agent: Optional[str] = None
-    
+
     def register_agent(self, agent_id: str, **kwargs) -> Agent:
         """Register a new agent or update existing."""
         if agent_id in self.agents:
@@ -82,7 +91,7 @@ class AgentManager:
             if self.current_agent is None:
                 self.current_agent = agent_id
         return self.agents[agent_id]
-    
+
     def get_agent(self, agent_id: str) -> Optional[Agent]:
         """Get agent by ID (supports partial match)."""
         if agent_id in self.agents:
@@ -92,13 +101,13 @@ class AgentManager:
             if aid.startswith(agent_id):
                 return agent
         return None
-    
+
     def get_current_agent(self) -> Optional[Agent]:
         """Get currently selected agent."""
         if self.current_agent:
             return self.agents.get(self.current_agent)
         return None
-    
+
     def select_agent(self, agent_id: str) -> bool:
         """Select an agent for interaction."""
         agent = self.get_agent(agent_id)
@@ -106,13 +115,13 @@ class AgentManager:
             self.current_agent = agent.agent_id
             return True
         return False
-    
+
     def queue_task(self, agent_id: str, task_type: str, payload: str) -> Task:
         """Queue a task for an agent."""
         agent = self.get_agent(agent_id)
         if not agent:
             raise ValueError(f"Agent {agent_id} not found")
-        
+
         task = Task(
             task_id=str(uuid.uuid4()),
             task_type=task_type,
@@ -120,14 +129,14 @@ class AgentManager:
         )
         agent.task_queue.append(task)
         return task
-    
+
     def get_next_task(self, agent_id: str) -> Optional[Task]:
         """Get next pending task for an agent (called on beacon)."""
         agent = self.get_agent(agent_id)
         if agent and agent.task_queue:
             return agent.task_queue.popleft()
         return None
-    
+
     def complete_task(self, agent_id: str, task_id: str, result: str):
         """Mark a task as completed with result."""
         agent = self.get_agent(agent_id)
@@ -139,18 +148,18 @@ class AgentManager:
                     task.result_at = time.time()
                     return
             # Task might have been moved already, create completed entry
-            task = Task(task_id=task_id, task_type="unknown", payload="", 
-                       completed=True, result=result, result_at=time.time())
+            task = Task(task_id=task_id, task_type="unknown", payload="",
+                        completed=True, result=result, result_at=time.time())
             agent.completed_tasks.append(task)
-    
+
     def list_agents(self) -> List[Dict]:
         """List all agents with their status."""
         return [agent.to_dict() for agent in self.agents.values()]
-    
+
     def get_alive_agents(self) -> List[Agent]:
         """Get all agents that have checked in recently."""
         return [a for a in self.agents.values() if a.is_alive()]
-    
+
     def remove_agent(self, agent_id: str):
         """Remove an agent."""
         agent = self.get_agent(agent_id)
@@ -167,18 +176,26 @@ MANAGER = AgentManager()
 if __name__ == "__main__":
     # Test
     mgr = AgentManager()
-    
+
     # Simulate agent registration
-    agent1 = mgr.register_agent("agent-123-abc", hostname="DESKTOP-1", username="admin", is_admin=True)
-    agent2 = mgr.register_agent("agent-456-def", hostname="LAPTOP-2", username="user", is_admin=False)
-    
+    agent1 = mgr.register_agent(
+        "agent-123-abc",
+        hostname="DESKTOP-1",
+        username="admin",
+        is_admin=True)
+    agent2 = mgr.register_agent(
+        "agent-456-def",
+        hostname="LAPTOP-2",
+        username="user",
+        is_admin=False)
+
     # Queue tasks
     mgr.queue_task("agent-123", "exec", "whoami")
     mgr.queue_task("agent-123", "exec", "ipconfig")
-    
+
     # Simulate beacon
     print("Agents:", mgr.list_agents())
-    
+
     # Get task for agent
     task = mgr.get_next_task("agent-123")
     print(f"Task for agent-123: {task}")
